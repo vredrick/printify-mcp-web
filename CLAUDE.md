@@ -26,6 +26,10 @@ Railway provides these environment variables automatically:
 - `RAILWAY_ENVIRONMENT_NAME` - Environment name (e.g., "production")
 - `RAILWAY_SERVICE_NAME` - Service name
 
+### Debug Mode
+Enable debug logging by setting:
+- `PRINTIFY_DEBUG=true` - Enables verbose logging for API requests/responses, cache hits, URL conversions
+
 ### Shop Initialization
 The Printify API client automatically selects the first available shop if none is specified:
 ```typescript
@@ -112,6 +116,29 @@ Configured for Railway deployment with:
 
 The registration flow creates unique MCP URLs that can be directly added to Claude.com or other MCP clients without requiring local installation.
 
+## Recent Improvements (Based on Claude AI Testing)
+
+### Connection Stability
+- Added keep-alive headers to prevent connection drops
+- Implemented 30-second timeout with proper retry logic
+- Enhanced error handling for network issues (ECONNRESET, ETIMEDOUT, EPIPE)
+- Increased retry attempts with exponential backoff
+
+### Blueprint Caching
+- 1-hour cache for blueprint data to reduce API calls
+- Fallback blueprint data when API fails
+- Cache hit logging in debug mode
+
+### Google Drive Support
+- Automatic conversion of Google Drive sharing URLs to direct download URLs
+- Supports multiple URL formats
+- Debug logging for URL conversions
+
+### Error Handling
+- Structured error codes (AUTH_FAILED, RATE_LIMIT, NOT_FOUND, etc.)
+- Custom PrintifyError class with context information
+- Better error messages with recovery suggestions
+
 ## Debugging Tips
 
 ### Common Issues and Solutions
@@ -122,7 +149,7 @@ The registration flow creates unique MCP URLs that can be directly added to Clau
    - Verify BASE_URL is being constructed correctly
 
 2. **Printify API Authentication Failures**
-   - Enable verbose logging in `printify-api.ts` by uncommenting console.log statements
+   - Enable debug mode with `PRINTIFY_DEBUG=true` environment variable
    - Check the Authorization header format in logs
    - Verify API key is being passed correctly from registration
 
@@ -166,51 +193,3 @@ When debugging issues, add logging at these key points:
 - Build dependencies (python3, make, g++) are included for native Node modules
 - The `postinstall` script is skipped in production to avoid TypeScript build errors
 - Memory limits are set to prevent out-of-memory errors during npm install
-
-## Debugging Tips
-
-### Common Issues and Solutions
-
-1. **Environment Variables Not Loading**
-   - Check Railway logs for the environment variable debug output at startup
-   - Look for `RAILWAY_PUBLIC_DOMAIN` in the logs
-   - Verify BASE_URL is being constructed correctly
-
-2. **Printify API Authentication Failures**
-   - Enable verbose logging in `printify-api.ts` by uncommenting console.log statements
-   - Check the Authorization header format in logs
-   - Verify API key is being passed correctly from registration
-
-3. **Shop Operations Failing**
-   - The shop switching feature currently has issues with persisting shop selection
-   - Users can work around this by not switching shops and using the default
-   - Products can still be accessed without explicit shop switching
-
-4. **MCP Connection Issues**
-   - Verify CORS headers are being sent correctly
-   - Check that the transport is in stateless mode (sessionIdGenerator: undefined)
-   - Ensure server and transport are properly cleaned up on request close
-
-### Debug Commands
-
-```bash
-# Check Railway deployment logs
-railway logs
-
-# Test health endpoint
-curl https://your-app.railway.app/health
-
-# Test MCP endpoint (should return error without proper auth)
-curl -X POST https://your-app.railway.app/api/mcp/a/test/mcp
-
-# Check environment variables in Railway
-railway variables
-```
-
-### Adding Debug Logging
-
-When debugging issues, add logging at these key points:
-1. Environment variable loading in server.ts
-2. API request/response in printify-api.ts makeRequest()
-3. Session creation and retrieval in server.ts
-4. MCP server creation and connection
