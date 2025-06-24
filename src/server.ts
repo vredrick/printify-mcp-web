@@ -441,6 +441,39 @@ app.all('/api/mcp/a/:userId/mcp', async (req, res) => {
   }
 });
 
+// Test connection endpoint - validates API key without creating a session
+app.post('/api/test-connection', async (req, res) => {
+  const { printifyApiKey } = req.body;
+  
+  if (!printifyApiKey) {
+    return res.status(400).json({ error: 'Printify API key is required' });
+  }
+  
+  try {
+    // Test the API key by initializing the client
+    console.log('Testing API key connection...');
+    const printifyClient = new PrintifyAPI(printifyApiKey);
+    
+    const shops = await printifyClient.initialize();
+    
+    res.json({
+      success: true,
+      shops: shops.map(shop => ({
+        id: shop.id,
+        title: shop.title,
+        sales_channel: shop.sales_channel
+      })),
+      message: 'Connection successful'
+    });
+  } catch (error: any) {
+    console.error('Test connection failed:', error);
+    res.status(400).json({ 
+      error: 'Failed to connect to Printify',
+      details: error.message 
+    });
+  }
+});
+
 // Registration endpoint - generates a unique URL for the user
 app.post('/api/register', async (req, res) => {
   const { printifyApiKey, replicateApiToken } = req.body;
@@ -495,6 +528,43 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok',
     activeSessions: userSessions.size,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Metrics endpoint for monitoring
+app.get('/metrics', (req, res) => {
+  const now = Date.now();
+  const sessionMetrics = Array.from(userSessions.values()).map(session => ({
+    hasReplicate: !!session.replicateClient,
+    shopId: session.shopId,
+    lastAccessedAgo: Math.floor((now - session.lastAccessed) / 1000) // seconds ago
+  }));
+  
+  const activeInLast5Min = sessionMetrics.filter(s => s.lastAccessedAgo < 300).length;
+  const activeInLast1Hour = sessionMetrics.filter(s => s.lastAccessedAgo < 3600).length;
+  
+  res.json({
+    server: {
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      nodeVersion: process.version,
+      platform: process.platform,
+      environment: process.env.NODE_ENV || 'development',
+      railwayEnvironment: process.env.RAILWAY_ENVIRONMENT_NAME
+    },
+    sessions: {
+      total: userSessions.size,
+      activeInLast5Min,
+      activeInLast1Hour,
+      withReplicate: sessionMetrics.filter(s => s.hasReplicate).length
+    },
+    deployment: {
+      baseUrl: getBaseUrl(),
+      port: PORT,
+      corsEnabled: true,
+      version: '1.0.0'
+    },
     timestamp: new Date().toISOString()
   });
 });

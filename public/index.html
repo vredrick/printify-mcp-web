@@ -272,6 +272,10 @@
             <button type="submit" class="submit-btn" id="submitBtn">
                 Connect to Printify
             </button>
+            
+            <button type="button" class="submit-btn" id="testBtn" style="margin-top: 10px; background: #28a745;">
+                Test Connection Only
+            </button>
         </form>
 
         <div id="result" class="result"></div>
@@ -291,7 +295,67 @@
     <script>
         const form = document.getElementById('registrationForm');
         const submitBtn = document.getElementById('submitBtn');
+        const testBtn = document.getElementById('testBtn');
         const resultDiv = document.getElementById('result');
+
+        // Test connection button
+        testBtn.addEventListener('click', async () => {
+            testBtn.disabled = true;
+            testBtn.innerHTML = 'Testing... <span class="loading"></span>';
+            resultDiv.style.display = 'none';
+            
+            const apiKey = document.getElementById('printifyApiKey').value;
+            
+            if (!apiKey) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = '<h3>❌ Error</h3><p>Please enter your Printify API key</p>';
+                resultDiv.style.display = 'block';
+                testBtn.disabled = false;
+                testBtn.innerHTML = 'Test Connection Only';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/test-connection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ printifyApiKey: apiKey })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <h3>✅ Connection Successful!</h3>
+                        <p>Found ${data.shops.length} shop(s):</p>
+                        <ul style="margin: 10px 0; padding-left: 20px;">
+                            ${data.shops.map(shop => `<li>${shop.title} (${shop.sales_channel})</li>`).join('')}
+                        </ul>
+                        <p style="color: #666; font-size: 14px;">Your API key is valid. You can now connect to Printify.</p>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `
+                        <h3>❌ Connection Failed</h3>
+                        <p>${data.error}</p>
+                        ${data.details ? `<p style="font-size: 12px; margin-top: 10px;">${data.details}</p>` : ''}
+                    `;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <h3>❌ Network Error</h3>
+                    <p>Failed to test connection. Please check your network.</p>
+                `;
+            } finally {
+                resultDiv.style.display = 'block';
+                testBtn.disabled = false;
+                testBtn.innerHTML = 'Test Connection Only';
+            }
+        });
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();

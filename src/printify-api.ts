@@ -49,7 +49,7 @@ export class PrintifyAPI {
     this.shopId = shopId;
   }
 
-  private async makeRequest(endpoint: string, options: any = {}): Promise<any> {
+  private async makeRequest(endpoint: string, options: any = {}, retries: number = 2): Promise<any> {
     const url = `${this.baseUrl}${endpoint}`;
     const headers = {
       'Authorization': `Bearer ${this.apiToken}`,
@@ -59,18 +59,65 @@ export class PrintifyAPI {
     console.log(`Making request to: ${url}`);
     console.log('Authorization header:', headers.Authorization ? 'Bearer ' + headers.Authorization.substring(7, 17) + '...' : 'None');
 
-    const response = await fetch(url, {
-      ...options,
-      headers
-    });
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers
+        });
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error(`Printify API error response:`, error);
-      throw new Error(`Printify API error: ${response.status} - ${error}`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          let errorMessage = `Printify API error: ${response.status}`;
+          
+          // Parse error details if possible
+          try {
+            const errorJson = JSON.parse(errorText);
+            if (errorJson.error) {
+              errorMessage = errorJson.error;
+            } else if (errorJson.message) {
+              errorMessage = errorJson.message;
+            }
+          } catch {
+            errorMessage += ` - ${errorText}`;
+          }
+
+          // Add helpful context for common errors
+          if (response.status === 401) {
+            errorMessage += '. Please check that your API key is valid and active in your Printify account settings.';
+          } else if (response.status === 429) {
+            errorMessage += '. Rate limit exceeded. Please wait a moment and try again.';
+          } else if (response.status === 404) {
+            errorMessage += '. The requested resource was not found. It may have been deleted or the ID is incorrect.';
+          }
+
+          console.error(`Printify API error response:`, errorText);
+          
+          // Retry on rate limit or server errors
+          if ((response.status === 429 || response.status >= 500) && attempt < retries) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 5000); // Exponential backoff, max 5s
+            console.log(`Retrying after ${delay}ms (attempt ${attempt + 1}/${retries})...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          
+          throw new Error(errorMessage);
+        }
+
+        return response.json();
+      } catch (error: any) {
+        // Retry on network errors
+        if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+          if (attempt < retries) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+            console.log(`Network error, retrying after ${delay}ms (attempt ${attempt + 1}/${retries})...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+        }
+        throw error;
+      }
     }
-
-    return response.json();
   }
 
   async initialize(): Promise<PrintifyShop[]> {
@@ -99,25 +146,45 @@ export class PrintifyAPI {
   async setShop(shopId: string) {
     const shop = this.shops.find(s => s.id === shopId);
     if (!shop) {
-      throw new Error(`Shop with ID ${shopId} not found`);
+      const availableShops = this.shops.map(s => `${s.title} (ID: ${s.id})`).join(', ');
+      throw new Error(
+        `Shop with ID "${shopId}" not found. Available shops: ${availableShops || 'none'}. ` +
+        `Note: Shop switching has known issues. Try using the default shop without switching.`
+      );
     }
     this.shopId = shopId;
+    console.log(`Switched to shop: ${shop.title} (${shopId})`);
   }
 
   async getProducts(page: number = 1, limit: number = 10): Promise<any> {
-    if (!this.shopId) throw new Error('No shop selected');
+    if (!this.shopId) {
+      throw new Error(
+        'No shop selected. The shop should be automatically selected on initialization. ' +
+        'Try re-registering if this error persists.'
+      );
+    }
     
     return this.makeRequest(`/shops/${this.shopId}/products.json?page=${page}&limit=${limit}`);
   }
 
   async getProduct(productId: string): Promise<PrintifyProduct> {
-    if (!this.shopId) throw new Error('No shop selected');
+    if (!this.shopId) {
+      throw new Error(
+        'No shop selected. The shop should be automatically selected on initialization. ' +
+        'Try re-registering if this error persists.'
+      );
+    }
     
     return this.makeRequest(`/shops/${this.shopId}/products/${productId}.json`);
   }
 
   async createProduct(productData: any): Promise<PrintifyProduct> {
-    if (!this.shopId) throw new Error('No shop selected');
+    if (!this.shopId) {
+      throw new Error(
+        'No shop selected. The shop should be automatically selected on initialization. ' +
+        'Try re-registering if this error persists.'
+      );
+    }
     
     const formattedData = {
       title: productData.title,
@@ -130,7 +197,7 @@ export class PrintifyAPI {
         is_enabled: v.isEnabled !== false
       })),
       print_areas: productData.printAreas ? 
-        Object.entries(productData.printAreas).map(([key, area]: [string, any]) => ({
+        Object.entries(productData.printAreas).map(([, area]: [string, any]) => ({
           variant_ids: productData.variants.map((v: any) => v.variantId),
           placeholders: [{
             position: area.position,
