@@ -52,8 +52,6 @@ interface UserSession {
   shopId?: string;
   printifyClient: PrintifyAPI;
   replicateClient?: ReplicateClient;
-  mcpServer?: McpServer;
-  transport?: StreamableHTTPServerTransport;
   lastAccessed: number;
 }
 
@@ -66,13 +64,6 @@ setInterval(() => {
   
   for (const [userId, session] of userSessions.entries()) {
     if (now - session.lastAccessed > sessionTimeout) {
-      // Clean up MCP server and transport
-      if (session.transport) {
-        session.transport.close().catch(console.error);
-      }
-      if (session.mcpServer) {
-        session.mcpServer.close().catch(console.error);
-      }
       userSessions.delete(userId);
       console.log(`Cleaned up inactive session for user ${userId}`);
     }
@@ -388,53 +379,46 @@ function generateUserEndpoint(): string {
 }
 
 // Main MCP endpoint - handles all requests for a specific user
-app.all('/api/mcp/a/:userId/mcp', validateApiKey, async (req, res) => {
+app.all('/api/mcp/a/:userId/mcp', async (req, res) => {
   const userId = req.params.userId;
-  const apiKey = (req as any).apiKey;
   
   try {
-    // Get or create user session
-    let session = userSessions.get(userId);
+    // Get user session
+    const session = userSessions.get(userId);
     
     if (!session) {
-      // Initialize new session with user's API key
-      const printifyClient = new PrintifyAPI(apiKey, process.env.PRINTIFY_SHOP_ID);
-      await printifyClient.initialize();
-      
-      session = {
-        printifyApiKey: apiKey,
-        printifyClient,
-        lastAccessed: Date.now(),
-      };
-      
-      // Initialize Replicate if user provides the token
-      const replicateToken = req.headers['x-replicate-token'] as string;
-      if (replicateToken) {
-        session.replicateClient = new ReplicateClient(replicateToken);
-      }
-      
-      userSessions.set(userId, session);
+      return res.status(404).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32001,
+          message: 'Session not found. Please register first.',
+        },
+        id: null,
+      });
     }
     
     // Update last accessed time
     session.lastAccessed = Date.now();
     
-    // Create MCP server and transport if not exists
-    if (!session.mcpServer || !session.transport) {
-      // Create transport in stateless mode
-      session.transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined, // Stateless mode for web
-      });
-      
-      // Create MCP server
-      session.mcpServer = createUserMcpServer(session);
-      
-      // Connect the transport and server
-      await session.mcpServer.connect(session.transport);
-    }
+    // Create new MCP server instance for this request (following SDK pattern)
+    const server = createUserMcpServer(session);
     
-    // Handle the request through the transport
-    await session.transport.handleRequest(req, res, req.body);
+    // Create transport in stateless mode
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined, // Stateless mode
+    });
+    
+    // Connect server to transport
+    await server.connect(transport);
+    
+    // Handle the request
+    await transport.handleRequest(req, res, req.body);
+    
+    // Clean up when response is done
+    res.on('close', () => {
+      transport.close().catch(console.error);
+      server.close().catch(console.error);
+    });
     
   } catch (error: any) {
     console.error('Error handling MCP request:', error);
@@ -487,7 +471,15 @@ app.post('/api/register', async (req, res) => {
     userSessions.set(userId, session);
     
     // Return the unique MCP endpoint URL
-    const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+    let baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+    
+    // Ensure BASE_URL has protocol
+    if (baseUrl && !baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+      baseUrl = `https://${baseUrl}`;
+    }
+    
+    console.log(`Generated MCP URL with BASE_URL: ${baseUrl}`);
+    
     res.json({
       success: true,
       mcpUrl: `${baseUrl}/api/mcp/a/${userId}/mcp`,
@@ -539,9 +531,16 @@ const HOST = '0.0.0.0'; // Bind to all interfaces for container compatibility
 console.log(`Starting server with PORT=${PORT}, BASE_URL=${process.env.BASE_URL}`);
 
 app.listen(PORT, HOST, () => {
+  let baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+  
+  // Ensure BASE_URL has protocol
+  if (baseUrl && !baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
+    baseUrl = `https://${baseUrl}`;
+  }
+  
   console.log(`Printify MCP Web Server running on ${HOST}:${PORT}`);
-  console.log(`Health check available at: http://${HOST}:${PORT}/health`);
-  console.log(`Register at: ${process.env.BASE_URL || `http://localhost:${PORT}`}`);
+  console.log(`Health check available at: ${baseUrl}/health`);
+  console.log(`Register at: ${baseUrl}`);
 }).on('error', (error) => {
   console.error('Failed to start server:', error);
   process.exit(1);
