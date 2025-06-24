@@ -451,7 +451,10 @@ app.post('/api/register', async (req, res) => {
   
   try {
     // Validate the API key by initializing the client
+    console.log('Registration attempt with API key:', printifyApiKey ? printifyApiKey.substring(0, 10) + '...' : 'None');
     const printifyClient = new PrintifyAPI(printifyApiKey);
+    
+    console.log('Initializing Printify API...');
     await printifyClient.initialize();
     
     // Generate unique user ID
@@ -471,13 +474,7 @@ app.post('/api/register', async (req, res) => {
     userSessions.set(userId, session);
     
     // Return the unique MCP endpoint URL
-    let baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
-    
-    // Ensure BASE_URL has protocol
-    if (baseUrl && !baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
-      baseUrl = `https://${baseUrl}`;
-    }
-    
+    const baseUrl = getBaseUrl();
     console.log(`Generated MCP URL with BASE_URL: ${baseUrl}`);
     
     res.json({
@@ -528,17 +525,48 @@ process.on('uncaughtException', (error) => {
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = '0.0.0.0'; // Bind to all interfaces for container compatibility
 
-console.log(`Starting server with PORT=${PORT}, BASE_URL=${process.env.BASE_URL}`);
+// Debug environment variables
+console.log('=== Environment Variable Debug ===');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('PORT:', process.env.PORT);
+console.log('BASE_URL:', process.env.BASE_URL);
+console.log('RAILWAY_PUBLIC_DOMAIN:', process.env.RAILWAY_PUBLIC_DOMAIN);
+console.log('RAILWAY_STATIC_URL:', process.env.RAILWAY_STATIC_URL);
+console.log('RAILWAY_ENVIRONMENT_NAME:', process.env.RAILWAY_ENVIRONMENT_NAME);
+console.log('Available env vars:', Object.keys(process.env).filter(k => 
+  !k.includes('SECRET') && 
+  !k.includes('TOKEN') && 
+  !k.includes('PASSWORD') &&
+  !k.includes('KEY')
+).sort());
+console.log('=================================');
 
-app.listen(PORT, HOST, () => {
-  let baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+// Helper function to get the base URL
+function getBaseUrl(): string {
+  // Try various Railway environment variables
+  let baseUrl = process.env.BASE_URL || 
+                process.env.RAILWAY_PUBLIC_DOMAIN ||
+                process.env.RAILWAY_STATIC_URL ||
+                `http://localhost:${PORT}`;
   
-  // Ensure BASE_URL has protocol
+  // If we have a Railway public domain, use it
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+    baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN;
+  }
+  
+  // Ensure URL has protocol
   if (baseUrl && !baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
     baseUrl = `https://${baseUrl}`;
   }
   
+  return baseUrl;
+}
+
+app.listen(PORT, HOST, () => {
+  const baseUrl = getBaseUrl();
+  
   console.log(`Printify MCP Web Server running on ${HOST}:${PORT}`);
+  console.log(`Detected BASE_URL: ${baseUrl}`);
   console.log(`Health check available at: ${baseUrl}/health`);
   console.log(`Register at: ${baseUrl}`);
 }).on('error', (error) => {

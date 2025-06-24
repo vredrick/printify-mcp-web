@@ -56,6 +56,9 @@ export class PrintifyAPI {
       ...options.headers
     };
 
+    console.log(`Making request to: ${url}`);
+    console.log('Authorization header:', headers.Authorization ? 'Bearer ' + headers.Authorization.substring(7, 17) + '...' : 'None');
+
     const response = await fetch(url, {
       ...options,
       headers
@@ -63,6 +66,7 @@ export class PrintifyAPI {
 
     if (!response.ok) {
       const error = await response.text();
+      console.error(`Printify API error response:`, error);
       throw new Error(`Printify API error: ${response.status} - ${error}`);
     }
 
@@ -70,28 +74,22 @@ export class PrintifyAPI {
   }
 
   async initialize(): Promise<PrintifyShop[]> {
-    try {
-      // Fetch available shops
-      this.shops = await this.makeRequest('/shops.json');
-      
-      // If no shop ID is provided, use the first shop
-      if (!this.shopId && this.shops.length > 0) {
-        this.shopId = this.shops[0].id;
-        console.log(`Using default shop: ${this.shops[0].title} (${this.shopId})`);
-      }
-      
-      return this.shops;
-    } catch (error) {
-      console.error('Error initializing Printify API:', error);
-      // Return mock data for development if API fails
-      this.shops = [{
-        id: 'mock-shop-id',
-        title: 'Mock Shop',
-        sales_channel: 'mock'
-      }];
+    console.log('Printify API initialize called');
+    console.log('API Token:', this.apiToken ? this.apiToken.substring(0, 10) + '...' : 'None');
+    console.log('Making request to /shops.json');
+    
+    // Fetch available shops
+    this.shops = await this.makeRequest('/shops.json');
+    
+    console.log(`Found ${this.shops.length} shops`);
+    
+    // If no shop ID is provided, use the first shop
+    if (!this.shopId && this.shops.length > 0) {
       this.shopId = this.shops[0].id;
-      return this.shops;
+      console.log(`Using default shop: ${this.shops[0].title} (${this.shopId})`);
     }
+    
+    return this.shops;
   }
 
   async getShops(): Promise<PrintifyShop[]> {
