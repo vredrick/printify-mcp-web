@@ -498,9 +498,34 @@ app.get('/', (req, res) => {
   res.sendFile('index.html', { root: path.join(__dirname, 'public') });
 });
 
+// Global error handler
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
 // Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Printify MCP Web Server running on port ${PORT}`);
-  console.log(`Register at: http://localhost:${PORT}`);
+const PORT = parseInt(process.env.PORT || '3000', 10);
+const HOST = '0.0.0.0'; // Bind to all interfaces for container compatibility
+
+console.log(`Starting server with PORT=${PORT}, BASE_URL=${process.env.BASE_URL}`);
+
+app.listen(PORT, HOST, () => {
+  console.log(`Printify MCP Web Server running on ${HOST}:${PORT}`);
+  console.log(`Health check available at: http://${HOST}:${PORT}/health`);
+  console.log(`Register at: ${process.env.BASE_URL || `http://localhost:${PORT}`}`);
+}).on('error', (error) => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
 });
