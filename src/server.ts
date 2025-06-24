@@ -177,19 +177,19 @@ function createUserMcpServer(session: UserSession) {
   server.tool(
     "create-product",
     {
-      title: z.string().describe("Product title"),
-      description: z.string().describe("Product description"),
-      blueprintId: z.number().describe("Blueprint ID"),
-      printProviderId: z.number().describe("Print provider ID"),
+      title: z.string().describe("Product title (e.g., 'Cool T-Shirt Design')"),
+      description: z.string().describe("Product description for customers"),
+      blueprintId: z.number().describe("Blueprint ID (e.g., 5 for Bella+Canvas 3001 T-Shirt)"),
+      printProviderId: z.number().describe("Print provider ID (get from get-print-providers)"),
       variants: z.array(z.object({
-        variantId: z.number().describe("Variant ID"),
+        variantId: z.number().describe("Variant ID from get-variants"),
         price: z.number().describe("Price in cents (e.g., 1999 for $19.99)"),
-        isEnabled: z.boolean().optional().default(true).describe("Whether the variant is enabled")
-      })).describe("Product variants"),
+        isEnabled: z.boolean().optional().default(true).describe("Whether to sell this variant")
+      })).describe("Product variants with pricing"),
       printAreas: z.record(z.string(), z.object({
         position: z.string().describe("Print position (e.g., 'front', 'back')"),
-        imageId: z.string().describe("Image ID from Printify uploads")
-      })).optional().describe("Print areas for the product")
+        imageId: z.string().describe("Image ID from upload-image")
+      })).optional().describe("Design placement on product")
     },
     async (params) => {
       const product = await session.printifyClient.createProduct(params);
@@ -271,8 +271,12 @@ function createUserMcpServer(session: UserSession) {
   server.tool(
     "upload-image",
     {
-      fileName: z.string().describe("File name"),
-      url: z.string().describe("URL of the image to upload, path to local file, or base64 encoded image data")
+      fileName: z.string().describe("File name (e.g., 'my-design.png')"),
+      url: z.string().describe(`Image source - supports multiple formats:
+        - Direct URL: https://example.com/image.png
+        - Google Drive: https://drive.google.com/file/d/{id}/view (auto-converted)
+        - Local file: /path/to/image.png
+        - Base64 data: data:image/png;base64,iVBORw0...`)
     },
     async ({ fileName, url }) => {
       const image = await session.printifyClient.uploadImage(fileName, url);
@@ -1079,13 +1083,27 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// Health check endpoint
+// Health check endpoint with enhanced monitoring
 app.get('/health', (req, res) => {
-  res.json({ 
+  const health = {
     status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
     activeSessions: userSessions.size,
-    timestamp: new Date().toISOString()
-  });
+    environment: {
+      nodeVersion: process.version,
+      platform: process.platform,
+      railwayEnvironment: process.env.RAILWAY_ENVIRONMENT_NAME || 'local',
+      debugMode: process.env.PRINTIFY_DEBUG === 'true'
+    },
+    features: {
+      printifyEnabled: true,
+      replicateEnabled: !!process.env.REPLICATE_API_TOKEN,
+      cacheEnabled: true
+    }
+  };
+  
+  res.json(health);
 });
 
 // Metrics endpoint for monitoring

@@ -1,6 +1,32 @@
 import fetch from 'node-fetch';
 import { promises as fs } from 'fs';
 
+// Error codes for better error handling
+export enum PrintifyErrorCode {
+  AUTH_FAILED = 'AUTH_FAILED',
+  RATE_LIMIT = 'RATE_LIMIT',
+  NOT_FOUND = 'NOT_FOUND',
+  NETWORK_ERROR = 'NETWORK_ERROR',
+  TIMEOUT = 'TIMEOUT',
+  VALIDATION_ERROR = 'VALIDATION_ERROR',
+  SERVER_ERROR = 'SERVER_ERROR',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR'
+}
+
+export class PrintifyError extends Error {
+  code: PrintifyErrorCode;
+  statusCode?: number;
+  context?: any;
+
+  constructor(message: string, code: PrintifyErrorCode, statusCode?: number, context?: any) {
+    super(message);
+    this.name = 'PrintifyError';
+    this.code = code;
+    this.statusCode = statusCode;
+    this.context = context;
+  }
+}
+
 export interface PrintifyShop {
   id: string;
   title: string;
@@ -36,36 +62,55 @@ export interface PrintifyImage {
   upload_time: string;
 }
 
+// Simple cache for blueprint data
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
 export class PrintifyAPI {
   private apiToken: string;
   public shopId: string | undefined;
   private baseUrl = 'https://api.printify.com/v1';
   public shops: PrintifyShop[] = [];
+  private blueprintCache = new Map<string, CacheEntry<any>>();
+  private cacheTimeout = 3600000; // 1 hour cache
 
   constructor(apiToken: string, shopId?: string) {
     this.apiToken = apiToken;
     this.shopId = shopId;
   }
 
-  private async makeRequest(endpoint: string, options: any = {}, retries: number = 2): Promise<any> {
+  private async makeRequest(endpoint: string, options: any = {}, retries: number = 3): Promise<any> {
     const url = `${this.baseUrl}${endpoint}`;
     const headers = {
       'Authorization': `Bearer ${this.apiToken}`,
       'User-Agent': 'printify-mcp-web/1.0.0',
       'Content-Type': 'application/json;charset=utf-8',
+      'Connection': 'keep-alive',
+      'Keep-Alive': 'timeout=30',
       ...options.headers
     };
 
-    console.log(`Making request to: ${url}`);
-    console.log('Authorization header:', headers.Authorization ? 'Bearer ' + headers.Authorization.substring(7, 17) + '...' : 'None');
-    console.log('User-Agent:', headers['User-Agent']);
+    const debugMode = process.env.PRINTIFY_DEBUG === 'true';
+    if (debugMode) {
+      console.log(`[DEBUG] Making request to: ${url}`);
+      console.log('[DEBUG] Method:', options.method || 'GET');
+      console.log('[DEBUG] Headers:', { ...headers, Authorization: 'Bearer ***' });
+    }
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+        
         const response = await fetch(url, {
           ...options,
-          headers
+          headers,
+          signal: controller.signal
         });
+        
+        clearTimeout(timeout);
 
         if (!response.ok) {
           const errorText = await response.text();
@@ -83,16 +128,28 @@ export class PrintifyAPI {
             errorMessage += ` - ${errorText}`;
           }
 
-          // Add helpful context for common errors
+          // Map status codes to error codes
+          let errorCode = PrintifyErrorCode.UNKNOWN_ERROR;
           if (response.status === 401) {
+            errorCode = PrintifyErrorCode.AUTH_FAILED;
             errorMessage += '. Please check that your API key is valid and active in your Printify account settings.';
           } else if (response.status === 429) {
+            errorCode = PrintifyErrorCode.RATE_LIMIT;
             errorMessage += '. Rate limit exceeded. Please wait a moment and try again.';
           } else if (response.status === 404) {
+            errorCode = PrintifyErrorCode.NOT_FOUND;
             errorMessage += '. The requested resource was not found. It may have been deleted or the ID is incorrect.';
+          } else if (response.status === 400 || response.status === 422) {
+            errorCode = PrintifyErrorCode.VALIDATION_ERROR;
+            errorMessage += '. Request validation failed. Check your input parameters.';
+          } else if (response.status >= 500) {
+            errorCode = PrintifyErrorCode.SERVER_ERROR;
+            errorMessage += '. Printify server error. Please try again later.';
           }
 
-          console.error(`Printify API error response:`, errorText);
+          if (debugMode) {
+            console.error(`[DEBUG] API error response:`, errorText);
+          }
           
           // Retry on rate limit or server errors
           if ((response.status === 429 || response.status >= 500) && attempt < retries) {
@@ -102,19 +159,50 @@ export class PrintifyAPI {
             continue;
           }
           
-          throw new Error(errorMessage);
+          throw new PrintifyError(errorMessage, errorCode, response.status, { endpoint, errorText });
         }
 
-        return response.json();
+        const result = await response.json();
+        if (debugMode) {
+          console.log('[DEBUG] Response received successfully');
+        }
+        return result;
       } catch (error: any) {
-        // Retry on network errors
-        if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+        // Handle timeout/abort errors
+        if (error.name === 'AbortError') {
+          console.error(`Request timeout after 30s: ${url}`);
           if (attempt < retries) {
-            const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
-            console.log(`Network error, retrying after ${delay}ms (attempt ${attempt + 1}/${retries})...`);
+            const delay = Math.min(2000 * Math.pow(2, attempt), 10000);
+            console.log(`Retrying after timeout (attempt ${attempt + 1}/${retries})...`);
             await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
+          throw new PrintifyError(
+            `Request timeout after 30 seconds: ${endpoint}`,
+            PrintifyErrorCode.TIMEOUT,
+            undefined,
+            { endpoint, url }
+          );
+        }
+        
+        // Retry on network errors
+        if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'EPIPE') {
+          if (attempt < retries) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+            console.log(`Network error (${error.code}), retrying after ${delay}ms (attempt ${attempt + 1}/${retries})...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw new PrintifyError(
+            `Network error: ${error.code || error.message}`,
+            PrintifyErrorCode.NETWORK_ERROR,
+            undefined,
+            { endpoint, errorCode: error.code }
+          );
+        }
+        
+        if (debugMode) {
+          console.error('[DEBUG] Request failed:', error);
         }
         throw error;
       }
@@ -276,6 +364,30 @@ export class PrintifyAPI {
     });
   }
 
+  private convertGoogleDriveUrl(url: string): string {
+    // Convert Google Drive sharing URLs to direct download URLs
+    const patterns = [
+      // https://drive.google.com/file/d/{id}/view
+      /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)\/view/,
+      // https://drive.google.com/open?id={id}
+      /drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/,
+      // https://drive.google.com/uc?id={id}&export=download (already direct)
+      /drive\.google\.com\/uc\?.*id=([a-zA-Z0-9_-]+)/
+    ];
+
+    for (const pattern of patterns) {
+      const match = url.match(pattern);
+      if (match) {
+        const fileId = match[1];
+        // Return direct download URL
+        return `https://drive.google.com/uc?export=download&id=${fileId}`;
+      }
+    }
+    
+    // Return original URL if not a Google Drive URL
+    return url;
+  }
+
   async uploadImage(fileName: string, source: string): Promise<PrintifyImage> {
     let requestBody: any = {
       file_name: fileName
@@ -283,8 +395,12 @@ export class PrintifyAPI {
 
     // Determine source type and prepare request body
     if (source.startsWith('http://') || source.startsWith('https://')) {
-      // For URLs, just pass the URL directly
-      requestBody.url = source;
+      // Convert Google Drive URLs automatically
+      const convertedUrl = this.convertGoogleDriveUrl(source);
+      if (convertedUrl !== source && process.env.PRINTIFY_DEBUG === 'true') {
+        console.log(`[DEBUG] Converted Google Drive URL: ${source} -> ${convertedUrl}`);
+      }
+      requestBody.url = convertedUrl;
     } else {
       // For local files or base64, we need to convert to base64
       let imageData: Buffer;
@@ -325,12 +441,73 @@ export class PrintifyAPI {
     return result as PrintifyImage;
   }
 
+  private getCacheKey(endpoint: string): string {
+    return `cache:${endpoint}`;
+  }
+
+  private getFromCache<T>(key: string): T | null {
+    const cached = this.blueprintCache.get(key);
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      if (process.env.PRINTIFY_DEBUG === 'true') {
+        console.log(`[DEBUG] Cache hit for: ${key}`);
+      }
+      return cached.data;
+    }
+    return null;
+  }
+
+  private setCache<T>(key: string, data: T): void {
+    this.blueprintCache.set(key, { data, timestamp: Date.now() });
+  }
+
   async getBlueprints(page: number = 1, limit: number = 10): Promise<any> {
-    return this.makeRequest(`/catalog/blueprints.json?page=${page}&limit=${limit}`);
+    const cacheKey = this.getCacheKey(`blueprints:${page}:${limit}`);
+    
+    // Check cache first
+    const cached = this.getFromCache(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const result = await this.makeRequest(`/catalog/blueprints.json?page=${page}&limit=${limit}`);
+      this.setCache(cacheKey, result);
+      return result;
+    } catch (error: any) {
+      // If the request fails, provide a helpful fallback
+      console.error('Failed to fetch blueprints:', error.message);
+      
+      // Return some common blueprint IDs as fallback
+      const fallbackBlueprints = {
+        data: [
+          { id: 5, title: 'Bella + Canvas 3001 Unisex T-Shirt', description: 'Popular unisex t-shirt' },
+          { id: 6, title: 'Gildan 18500 Unisex Hoodie', description: 'Standard hoodie' },
+          { id: 265, title: 'Ceramic Mug 11oz', description: 'Standard coffee mug' },
+          { id: 520, title: 'Poster', description: 'Wall poster various sizes' }
+        ],
+        current_page: 1,
+        last_page: 1,
+        total: 4,
+        _fallback: true
+      };
+      
+      console.log('Using fallback blueprint data. For full catalog, try again later.');
+      return fallbackBlueprints;
+    }
   }
 
   async getBlueprint(blueprintId: string): Promise<any> {
-    return this.makeRequest(`/catalog/blueprints/${blueprintId}.json`);
+    const cacheKey = this.getCacheKey(`blueprint:${blueprintId}`);
+    
+    // Check cache first
+    const cached = this.getFromCache(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const result = await this.makeRequest(`/catalog/blueprints/${blueprintId}.json`);
+    this.setCache(cacheKey, result);
+    return result;
   }
 
   async getPrintProviders(blueprintId: string): Promise<any> {
