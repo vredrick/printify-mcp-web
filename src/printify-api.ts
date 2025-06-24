@@ -1,7 +1,5 @@
 import fetch from 'node-fetch';
-import FormData from 'form-data';
 import { promises as fs } from 'fs';
-import path from 'path';
 
 export interface PrintifyShop {
   id: string;
@@ -207,8 +205,8 @@ export class PrintifyAPI {
             position: area.position,
             images: [{
               id: area.imageId,
-              x: 0.5,
-              y: 0.5,
+              x: 0,
+              y: 0,
               scale: 1,
               angle: 0
             }]
@@ -279,58 +277,52 @@ export class PrintifyAPI {
   }
 
   async uploadImage(fileName: string, source: string): Promise<PrintifyImage> {
-    let imageData: Buffer;
-    let contentType = 'image/png';
+    let requestBody: any = {
+      file_name: fileName
+    };
 
-    // Determine source type and load image data
+    // Determine source type and prepare request body
     if (source.startsWith('http://') || source.startsWith('https://')) {
-      // Download from URL
-      const response = await fetch(source);
-      imageData = Buffer.from(await response.arrayBuffer());
-      contentType = response.headers.get('content-type') || 'image/png';
-    } else if (source.startsWith('data:')) {
-      // Base64 data
-      const matches = source.match(/^data:(.+);base64,(.+)$/);
-      if (!matches) throw new Error('Invalid base64 data');
-      
-      contentType = matches[1];
-      imageData = Buffer.from(matches[2], 'base64');
+      // For URLs, just pass the URL directly
+      requestBody.url = source;
     } else {
-      // Local file path
-      imageData = await fs.readFile(source);
-      const ext = path.extname(source).toLowerCase();
-      contentType = {
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.png': 'image/png',
-        '.gif': 'image/gif',
-        '.webp': 'image/webp'
-      }[ext] || 'image/png';
+      // For local files or base64, we need to convert to base64
+      let imageData: Buffer;
+      
+      if (source.startsWith('data:')) {
+        // Already base64 data
+        const matches = source.match(/^data:(.+);base64,(.+)$/);
+        if (!matches) throw new Error('Invalid base64 data');
+        requestBody.contents = matches[2];
+      } else {
+        // Local file path - read and convert to base64
+        imageData = await fs.readFile(source);
+        requestBody.contents = imageData.toString('base64');
+      }
     }
 
-    // Create form data
-    const form = new FormData();
-    form.append('file', imageData, {
-      filename: fileName,
-      contentType: contentType
-    });
+    console.log(`Uploading image: ${fileName} (${requestBody.url ? 'from URL' : 'from base64 data'})`);
 
-    // Upload to Printify
+    // Upload to Printify using JSON format
     const response = await fetch(`${this.baseUrl}/uploads/images.json`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.apiToken}`,
-        ...form.getHeaders()
+        'User-Agent': 'printify-mcp-web/1.0.0',
+        'Content-Type': 'application/json'
       },
-      body: form as any
+      body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
       const error = await response.text();
+      console.error(`Upload failed with status ${response.status}:`, error);
       throw new Error(`Failed to upload image: ${response.status} - ${error}`);
     }
 
-    return response.json() as Promise<PrintifyImage>;
+    const result = await response.json();
+    console.log('Image uploaded successfully:', result);
+    return result as PrintifyImage;
   }
 
   async getBlueprints(page: number = 1, limit: number = 10): Promise<any> {
