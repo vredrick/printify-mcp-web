@@ -36,8 +36,9 @@ app.use((req, res, next) => {
   }
   
   res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key, mcp-session-id');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-API-Key, X-Replicate-Token, mcp-session-id, Last-Event-ID');
   res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400'); // 24 hours
   
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
@@ -51,9 +52,32 @@ interface UserSession {
   shopId?: string;
   printifyClient: PrintifyAPI;
   replicateClient?: ReplicateClient;
+  mcpServer?: McpServer;
+  transport?: StreamableHTTPServerTransport;
+  lastAccessed: number;
 }
 
 const userSessions = new Map<string, UserSession>();
+
+// Clean up inactive sessions every 30 minutes
+setInterval(() => {
+  const now = Date.now();
+  const sessionTimeout = 60 * 60 * 1000; // 1 hour
+  
+  for (const [userId, session] of userSessions.entries()) {
+    if (now - session.lastAccessed > sessionTimeout) {
+      // Clean up MCP server and transport
+      if (session.transport) {
+        session.transport.close().catch(console.error);
+      }
+      if (session.mcpServer) {
+        session.mcpServer.close().catch(console.error);
+      }
+      userSessions.delete(userId);
+      console.log(`Cleaned up inactive session for user ${userId}`);
+    }
+  }
+}, 30 * 60 * 1000); // Run every 30 minutes
 
 // API key validation middleware
 const validateApiKey = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -380,6 +404,7 @@ app.all('/api/mcp/a/:userId/mcp', validateApiKey, async (req, res) => {
       session = {
         printifyApiKey: apiKey,
         printifyClient,
+        lastAccessed: Date.now(),
       };
       
       // Initialize Replicate if user provides the token
@@ -391,53 +416,44 @@ app.all('/api/mcp/a/:userId/mcp', validateApiKey, async (req, res) => {
       userSessions.set(userId, session);
     }
     
-    // Handle based on request method
-    if (req.method === 'POST') {
-      // Create transport for this request
-      const transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: undefined, // Stateless mode
+    // Update last accessed time
+    session.lastAccessed = Date.now();
+    
+    // Create MCP server and transport if not exists
+    if (!session.mcpServer || !session.transport) {
+      // Create transport in stateless mode
+      session.transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined, // Stateless mode for web
       });
       
-      // Create MCP server for this user
-      const server = createUserMcpServer(session);
-      await server.connect(transport);
+      // Create MCP server
+      session.mcpServer = createUserMcpServer(session);
       
-      // Handle the request
-      await transport.handleRequest(req, res, req.body);
-      
-      // Clean up
-      transport.close();
-      server.close();
-    } else if (req.method === 'GET') {
-      // SSE endpoint for server-sent events
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      });
-      res.write('data: {"type":"ping"}\n\n');
-      
-      // Keep connection alive
-      const interval = setInterval(() => {
-        res.write('data: {"type":"ping"}\n\n');
-      }, 30000);
-      
-      req.on('close', () => {
-        clearInterval(interval);
-      });
-    } else {
-      res.status(405).json({ error: 'Method not allowed' });
+      // Connect the transport and server
+      await session.mcpServer.connect(session.transport);
     }
+    
+    // Handle the request through the transport
+    await session.transport.handleRequest(req, res, req.body);
+    
   } catch (error: any) {
-    console.error('Error handling request:', error);
-    res.status(500).json({
-      jsonrpc: '2.0',
-      error: {
-        code: -32603,
-        message: error.message || 'Internal server error',
-      },
-      id: null,
-    });
+    console.error('Error handling MCP request:', error);
+    
+    // Return proper JSON-RPC error response
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: error.message || 'Internal server error',
+          data: {
+            type: error.name,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+          }
+        },
+        id: null,
+      });
+    }
   }
 });
 
@@ -461,6 +477,7 @@ app.post('/api/register', async (req, res) => {
     const session: UserSession = {
       printifyApiKey,
       printifyClient,
+      lastAccessed: Date.now(),
     };
     
     if (replicateApiToken) {
