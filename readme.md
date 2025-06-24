@@ -28,7 +28,7 @@ A web-accessible Model Context Protocol (MCP) server for Printify's print-on-dem
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/printify-mcp-web.git
+git clone https://github.com/vredrick/printify-mcp-web.git
 cd printify-mcp-web
 
 # Install dependencies
@@ -37,6 +37,18 @@ npm install
 # Run in development mode
 npm run dev
 ```
+
+### Docker Build
+
+```bash
+# Build the Docker image
+docker build -t printify-mcp-web .
+
+# Run the container
+docker run -p 3000:3000 -e PORT=3000 -e BASE_URL=http://localhost:3000 printify-mcp-web
+```
+
+**Note**: The Docker build requires at least 2GB of memory. If you encounter build failures, ensure Docker has sufficient memory allocated.
 
 ## Usage
 
@@ -131,6 +143,6 @@ MIT License - see LICENSE file for details
 
 ## Support
 
-- [GitHub Issues](https://github.com/yourusername/printify-mcp-web/issues)
+- [GitHub Issues](https://github.com/vredrick/printify-mcp-web/issues)
 - [Printify API Documentation](https://developers.printify.com/)
 - [MCP Documentation](https://modelcontextprotocol.io/)
