@@ -87,11 +87,24 @@ const validateApiKey = async (req: express.Request, res: express.Response, next:
 
 // Create MCP server instance for a specific user session
 function createUserMcpServer(session: UserSession) {
-  const server = new McpServer({
-    name: "printify-mcp",
-    version: "1.0.0",
-    vendor: "printify"
-  });
+  try {
+    // Ensure the Printify client has a valid shop ID
+    if (!session.printifyClient.shopId) {
+      const shops = session.printifyClient.shops || [];
+      if (shops.length > 0) {
+        // Re-initialize with the first available shop
+        session.printifyClient.shopId = String(shops[0].id);
+        console.log(`Recovered shop ID: ${shops[0].title} (${shops[0].id})`);
+      } else {
+        console.warn('No shops available for session, API calls may fail');
+      }
+    }
+    
+    const server = new McpServer({
+      name: "printify-mcp",
+      version: "1.0.0",
+      vendor: "printify"
+    });
 
   // List shops tool
   server.tool(
@@ -890,7 +903,11 @@ Naturally incorporate keywords while maintaining readability and conversion focu
     }
   );
 
-  return server;
+    return server;
+  } catch (error) {
+    console.error('Error creating MCP server:', error);
+    throw new Error(`Failed to create MCP server: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 // Generate unique API endpoint for each user
@@ -919,6 +936,25 @@ app.all('/api/mcp/a/:userId/mcp', async (req, res) => {
     
     // Update last accessed time
     session.lastAccessed = Date.now();
+    
+    // Session recovery: Re-initialize Printify client if shop ID is missing
+    if (!session.printifyClient.shopId) {
+      console.log('Session missing shop ID, attempting recovery...');
+      try {
+        await session.printifyClient.initialize();
+        console.log('Session recovered successfully');
+      } catch (initError) {
+        console.error('Failed to recover session:', initError);
+        return res.status(500).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32603,
+            message: 'Session recovery failed. Please re-register.',
+          },
+          id: null,
+        });
+      }
+    }
     
     // Create new MCP server instance for this request (following SDK pattern)
     const server = createUserMcpServer(session);
@@ -1115,21 +1151,27 @@ process.on('uncaughtException', (error) => {
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = '0.0.0.0'; // Bind to all interfaces for container compatibility
 
-// Debug environment variables
-console.log('=== Environment Variable Debug ===');
-console.log('NODE_ENV:', process.env.NODE_ENV);
-console.log('PORT:', process.env.PORT);
-console.log('BASE_URL:', process.env.BASE_URL);
-console.log('RAILWAY_PUBLIC_DOMAIN:', process.env.RAILWAY_PUBLIC_DOMAIN);
-console.log('RAILWAY_STATIC_URL:', process.env.RAILWAY_STATIC_URL);
-console.log('RAILWAY_ENVIRONMENT_NAME:', process.env.RAILWAY_ENVIRONMENT_NAME);
+// Debug environment variables for Railway deployment
+console.log('=== Railway Deployment Environment ===');
+console.log('NODE_ENV:', process.env.NODE_ENV || 'not set');
+console.log('PORT:', process.env.PORT || 'not set (default: 3000)');
+console.log('BASE_URL:', process.env.BASE_URL || 'not set');
+console.log('--- Railway Variables ---');
+console.log('RAILWAY_PUBLIC_DOMAIN:', process.env.RAILWAY_PUBLIC_DOMAIN || 'not set');
+console.log('RAILWAY_STATIC_URL:', process.env.RAILWAY_STATIC_URL || 'not set');
+console.log('RAILWAY_ENVIRONMENT_NAME:', process.env.RAILWAY_ENVIRONMENT_NAME || 'not set');
+console.log('RAILWAY_SERVICE_NAME:', process.env.RAILWAY_SERVICE_NAME || 'not set');
+console.log('RAILWAY_PROJECT_ID:', process.env.RAILWAY_PROJECT_ID || 'not set');
+console.log('RAILWAY_DEPLOYMENT_ID:', process.env.RAILWAY_DEPLOYMENT_ID || 'not set');
+console.log('--- All Available Env Vars ---');
 console.log('Available env vars:', Object.keys(process.env).filter(k => 
   !k.includes('SECRET') && 
   !k.includes('TOKEN') && 
   !k.includes('PASSWORD') &&
-  !k.includes('KEY')
+  !k.includes('KEY') &&
+  !k.includes('API')
 ).sort());
-console.log('=================================');
+console.log('======================================');
 
 // Helper function to get the base URL
 function getBaseUrl(): string {

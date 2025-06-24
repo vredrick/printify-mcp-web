@@ -112,6 +112,54 @@ Configured for Railway deployment with:
 
 The registration flow creates unique MCP URLs that can be directly added to Claude.com or other MCP clients without requiring local installation.
 
+## Debugging Tips
+
+### Common Issues and Solutions
+
+1. **Environment Variables Not Loading**
+   - Check Railway logs for the environment variable debug output at startup
+   - Look for `RAILWAY_PUBLIC_DOMAIN` in the logs
+   - Verify BASE_URL is being constructed correctly
+
+2. **Printify API Authentication Failures**
+   - Enable verbose logging in `printify-api.ts` by uncommenting console.log statements
+   - Check the Authorization header format in logs
+   - Verify API key is being passed correctly from registration
+
+3. **Shop Operations Failing**
+   - The shop switching feature currently has issues with persisting shop selection
+   - Users can work around this by not switching shops and using the default
+   - Products can still be accessed without explicit shop switching
+
+4. **MCP Connection Issues**
+   - Verify CORS headers are being sent correctly
+   - Check that the transport is in stateless mode (sessionIdGenerator: undefined)
+   - Ensure server and transport are properly cleaned up on request close
+
+### Debug Commands
+
+```bash
+# Check Railway deployment logs
+railway logs
+
+# Test health endpoint
+curl https://your-app.railway.app/health
+
+# Test MCP endpoint (should return error without proper auth)
+curl -X POST https://your-app.railway.app/api/mcp/a/test/mcp
+
+# Check environment variables in Railway
+railway variables
+```
+
+### Adding Debug Logging
+
+When debugging issues, add logging at these key points:
+1. Environment variable loading in server.ts
+2. API request/response in printify-api.ts makeRequest()
+3. Session creation and retrieval in server.ts
+4. MCP server creation and connection
+
 ### Docker Build Notes
 
 - The Dockerfile uses a multi-stage build to minimize the final image size

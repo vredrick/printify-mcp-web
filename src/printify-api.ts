@@ -40,9 +40,9 @@ export interface PrintifyImage {
 
 export class PrintifyAPI {
   private apiToken: string;
-  private shopId: string | undefined;
+  public shopId: string | undefined;
   private baseUrl = 'https://api.printify.com/v1';
-  private shops: PrintifyShop[] = [];
+  public shops: PrintifyShop[] = [];
 
   constructor(apiToken: string, shopId?: string) {
     this.apiToken = apiToken;
@@ -53,11 +53,14 @@ export class PrintifyAPI {
     const url = `${this.baseUrl}${endpoint}`;
     const headers = {
       'Authorization': `Bearer ${this.apiToken}`,
+      'User-Agent': 'printify-mcp-web/1.0.0',
+      'Content-Type': 'application/json;charset=utf-8',
       ...options.headers
     };
 
     console.log(`Making request to: ${url}`);
     console.log('Authorization header:', headers.Authorization ? 'Bearer ' + headers.Authorization.substring(7, 17) + '...' : 'None');
+    console.log('User-Agent:', headers['User-Agent']);
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
@@ -132,7 +135,7 @@ export class PrintifyAPI {
     
     // If no shop ID is provided, use the first shop
     if (!this.shopId && this.shops.length > 0) {
-      this.shopId = this.shops[0].id;
+      this.shopId = String(this.shops[0].id);
       console.log(`Using default shop: ${this.shops[0].title} (${this.shopId})`);
     }
     
@@ -144,7 +147,8 @@ export class PrintifyAPI {
   }
 
   async setShop(shopId: string) {
-    const shop = this.shops.find(s => s.id === shopId);
+    // Convert both IDs to strings for comparison since API returns numbers
+    const shop = this.shops.find(s => String(s.id) === String(shopId));
     if (!shop) {
       const availableShops = this.shops.map(s => `${s.title} (ID: ${s.id})`).join(', ');
       throw new Error(
@@ -152,8 +156,8 @@ export class PrintifyAPI {
         `Note: Shop switching has known issues. Try using the default shop without switching.`
       );
     }
-    this.shopId = shopId;
-    console.log(`Switched to shop: ${shop.title} (${shopId})`);
+    this.shopId = String(shop.id);
+    console.log(`Switched to shop: ${shop.title} (${shop.id})`);
   }
 
   async getProducts(page: number = 1, limit: number = 10): Promise<any> {
