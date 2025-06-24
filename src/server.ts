@@ -1,6 +1,5 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { PrintifyAPI } from './printify-api.js';
@@ -8,14 +7,13 @@ import { ReplicateClient } from './replicate-client.js';
 import { z } from 'zod';
 import crypto from 'crypto';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = path.resolve();
 
 const app = express();
 app.use(express.json());
 
 // Serve static files from public directory
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // CORS configuration for web clients like Claude.com
 app.use((req, res, next) => {
@@ -497,7 +495,7 @@ app.get('/health', (req, res) => {
 
 // Serve the registration UI
 app.get('/', (req, res) => {
-  res.sendFile('index.html', { root: path.join(__dirname, '../public') });
+  res.sendFile('index.html', { root: path.join(__dirname, 'public') });
 });
 
 // Start server

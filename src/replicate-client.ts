@@ -1,10 +1,6 @@
 import fetch from 'node-fetch';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export class ReplicateClient {
   private apiToken: string;
@@ -13,7 +9,7 @@ export class ReplicateClient {
 
   constructor(apiToken: string) {
     this.apiToken = apiToken;
-    this.tempDir = path.join(__dirname, '../../temp');
+    this.tempDir = path.join(path.resolve(), 'temp');
     
     // Create temp directory if it doesn't exist
     if (!fs.existsSync(this.tempDir)) {

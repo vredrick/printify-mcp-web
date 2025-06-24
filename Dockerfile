@@ -11,8 +11,8 @@ COPY package*.json ./
 COPY tsconfig.json ./
 
 # Install all dependencies (including dev)
-# Use --no-audit to speed up installation and --max-old-space-size to prevent memory issues
-RUN NODE_OPTIONS="--max-old-space-size=2048" npm ci --no-audit
+# Use --no-audit to speed up installation and --ignore-scripts to skip postinstall
+RUN npm ci --no-audit --ignore-scripts
 
 # Copy source files
 COPY src ./src
@@ -37,7 +37,7 @@ RUN echo "ignore-scripts=true" > .npmrc
 
 # Install only production dependencies
 # Use --omit=dev instead of deprecated --only=production
-RUN NODE_OPTIONS="--max-old-space-size=1024" npm ci --omit=dev --no-audit
+RUN npm ci --omit=dev --no-audit
 
 # Remove .npmrc after installation
 RUN rm .npmrc
