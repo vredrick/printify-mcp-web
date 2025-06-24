@@ -415,11 +415,18 @@ Guide me through each step and explain the best practices.`
     'Generate multiple product variants from a single design',
     {
       designId: z.string().describe('The uploaded design image ID'),
-      productTypes: z.array(z.string()).describe('List of product types to create'),
-      basePrice: z.number().describe('Base price in cents to calculate variants from'),
+      productTypes: z.string().describe('Comma-separated list of product types to create (e.g., "t-shirt, hoodie, mug")'),
+      basePrice: z.string().describe('Base price in dollars (e.g., "19.99")'),
       namePattern: z.string().describe('Pattern for product names (e.g., "{design} - {type}")')
     },
     async ({ designId, productTypes, basePrice, namePattern }) => {
+      // Parse the comma-separated product types
+      const productTypesList = productTypes.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      
+      // Parse the price
+      const priceNumber = parseFloat(basePrice);
+      const formattedPrice = isNaN(priceNumber) ? basePrice : `$${priceNumber.toFixed(2)}`;
+      
       return {
         messages: [{
           role: 'user',
@@ -427,8 +434,8 @@ Guide me through each step and explain the best practices.`
             type: 'text',
             text: `I need to create multiple products using design ID: ${designId}
 
-Product types to create: ${productTypes.join(', ')}
-Base price: $${(basePrice / 100).toFixed(2)}
+Product types to create: ${productTypesList.join(', ')}
+Base price: ${formattedPrice}
 Naming pattern: ${namePattern}
 
 Please:
@@ -452,11 +459,17 @@ Optimize for efficiency while maintaining quality settings.`
     'Help prepare and upload designs with optimal settings',
     {
       designType: z.string().describe('Type of design (logo, pattern, illustration, photo)'),
-      intendedProducts: z.array(z.string()).describe('Products this design will be used on'),
-      hasTransparency: z.boolean().describe('Whether the design needs transparency'),
+      intendedProducts: z.string().describe('Comma-separated list of products this design will be used on (e.g., "t-shirt, mug, hoodie")'),
+      hasTransparency: z.string().describe('Whether the design needs transparency (yes/no)'),
       currentFormat: z.string().optional().describe('Current file format if known')
     },
     async ({ designType, intendedProducts, hasTransparency, currentFormat }) => {
+      // Parse the comma-separated products list
+      const productsList = intendedProducts.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      
+      // Parse the transparency boolean
+      const needsTransparency = hasTransparency.toLowerCase() === 'yes' || hasTransparency.toLowerCase() === 'true';
+      
       return {
         messages: [{
           role: 'user',
@@ -464,8 +477,8 @@ Optimize for efficiency while maintaining quality settings.`
             type: 'text',
             text: `I need help uploading a ${designType} design for Printify.
 
-Intended products: ${intendedProducts.join(', ')}
-Needs transparency: ${hasTransparency ? 'Yes' : 'No'}
+Intended products: ${productsList.join(', ')}
+Needs transparency: ${needsTransparency ? 'Yes' : 'No'}
 ${currentFormat ? `Current format: ${currentFormat}` : ''}
 
 Please help me:
@@ -488,12 +501,16 @@ Include specific technical requirements and best practices.`
     'Generate SEO-optimized product descriptions',
     {
       productName: z.string().describe('Name of the product'),
-      targetKeywords: z.array(z.string()).describe('SEO keywords to include'),
+      targetKeywords: z.string().describe('Comma-separated list of SEO keywords to include (e.g., "vintage, retro, graphic tee")'),
       tone: z.string().describe('Writing tone (professional, casual, playful, luxury)'),
-      features: z.array(z.string()).describe('Key product features to highlight'),
+      features: z.string().describe('Comma-separated list of key product features to highlight (e.g., "soft cotton, eco-friendly, unisex fit")'),
       idealCustomer: z.string().optional().describe('Description of ideal customer')
     },
     async ({ productName, targetKeywords, tone, features, idealCustomer }) => {
+      // Parse the comma-separated keywords and features
+      const keywordsList = targetKeywords.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      const featuresList = features.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      
       return {
         messages: [{
           role: 'user',
@@ -501,9 +518,9 @@ Include specific technical requirements and best practices.`
             type: 'text',
             text: `Write an SEO-optimized product description for: ${productName}
 
-Target keywords: ${targetKeywords.join(', ')}
+Target keywords: ${keywordsList.join(', ')}
 Tone: ${tone}
-Key features: ${features.join(', ')}
+Key features: ${featuresList.join(', ')}
 ${idealCustomer ? `Ideal customer: ${idealCustomer}` : ''}
 
 Create:

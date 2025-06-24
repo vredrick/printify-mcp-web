@@ -95,17 +95,17 @@ Interactive wizard to guide you through creating a product with best practices
 
 ### 📦 bulk-product-generator  
 Generate multiple product variants from a single design
-- Parameters: designId, productTypes, basePrice, namePattern
+- Parameters: designId, productTypes (comma-separated), basePrice (dollars), namePattern
 - Efficiently creates multiple products with consistent settings
 
 ### 🖼️ design-upload-assistant
 Help prepare and upload designs with optimal settings
-- Parameters: designType, intendedProducts, hasTransparency, currentFormat
+- Parameters: designType, intendedProducts (comma-separated), hasTransparency (yes/no), currentFormat
 - Ensures designs meet technical requirements
 
 ### ✍️ product-description-writer
 Generate SEO-optimized product descriptions
-- Parameters: productName, targetKeywords, tone, features, idealCustomer
+- Parameters: productName, targetKeywords (comma-separated), tone, features (comma-separated), idealCustomer
 - Creates compelling titles, descriptions, and tags
 
 ## Available Resources
@@ -147,12 +147,20 @@ create-product-wizard({
   priceRange: "mid-range"
 })
 
+// Generate multiple products from one design
+bulk-product-generator({
+  designId: "65ae7f0c116b930e23489128",
+  productTypes: "t-shirt, hoodie, mug",
+  basePrice: "19.99",
+  namePattern: "Mountain Adventure - {type}"
+})
+
 // Generate SEO-optimized descriptions
 product-description-writer({
   productName: "Mountain Adventure Tee",
-  targetKeywords: ["mountain", "hiking", "outdoor", "adventure"],
+  targetKeywords: "mountain, hiking, outdoor, adventure",
   tone: "casual",
-  features: ["soft cotton", "eco-friendly", "unisex fit"],
+  features: "soft cotton, eco-friendly, unisex fit",
   idealCustomer: "hikers and nature lovers"
 })
 ```
