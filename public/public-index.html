@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Printify MCP - Connect Your Account</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo h1 {
+            color: #333;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .logo p {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e1e4e8;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .optional-label {
+            color: #666;
+            font-size: 12px;
+            font-weight: normal;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f6f8fa;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .result.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+        }
+
+        .result.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+        }
+
+        .result h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+
+        .result .url {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            word-break: break-all;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+        }
+
+        .copy-btn {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .copy-btn:hover {
+            background: #5a63d8;
+        }
+
+        .instructions {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .instructions ol {
+            margin-left: 20px;
+            margin-top: 10px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .help-text a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .help-text a:hover {
+            text-decoration: underline;
+        }
+
+        .features {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e1e4e8;
+        }
+
+        .features h4 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .features ul {
+            list-style: none;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .features li {
+            padding-left: 20px;
+            position: relative;
+            margin-bottom: 8px;
+        }
+
+        .features li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>🎨 Printify MCP</h1>
+            <p>Connect your Printify account to AI assistants</p>
+        </div>
+
+        <form id="registrationForm">
+            <div class="form-group">
+                <label for="printifyApiKey">
+                    Printify API Key
+                </label>
+                <input 
+                    type="password" 
+                    id="printifyApiKey" 
+                    name="printifyApiKey" 
+                    placeholder="Enter your Printify API key"
+                    required
+                >
+                <p class="help-text">
+                    Get your API key from 
+                    <a href="https://printify.com/app/account/api" target="_blank">Printify Account Settings</a>
+                </p>
+            </div>
+
+            <div class="form-group">
+                <label for="replicateApiToken">
+                    Replicate API Token <span class="optional-label">(Optional)</span>
+                </label>
+                <input 
+                    type="password" 
+                    id="replicateApiToken" 
+                    name="replicateApiToken" 
+                    placeholder="For AI image generation"
+                >
+                <p class="help-text">
+                    Get your token from 
+                    <a href="https://replicate.com/account/api-tokens" target="_blank">Replicate</a>
+                </p>
+            </div>
+
+            <button type="submit" class="submit-btn" id="submitBtn">
+                Connect to Printify
+            </button>
+        </form>
+
+        <div id="result" class="result"></div>
+
+        <div class="features">
+            <h4>What you can do:</h4>
+            <ul>
+                <li>List and manage products</li>
+                <li>Create new products with AI-generated designs</li>
+                <li>Upload and manage images</li>
+                <li>Browse blueprints and variants</li>
+                <li>Publish products to your store</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('registrationForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const resultDiv = document.getElementById('result');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Disable submit button and show loading
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = 'Connecting... <span class="loading"></span>';
+            resultDiv.style.display = 'none';
+            
+            const formData = {
+                printifyApiKey: document.getElementById('printifyApiKey').value,
+                replicateApiToken: document.getElementById('replicateApiToken').value || undefined
+            };
+
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `
+                        <h3>🎉 Success! Your MCP endpoint is ready</h3>
+                        <div class="url" id="mcpUrl">${data.mcpUrl}</div>
+                        <button class="copy-btn" onclick="copyUrl()">Copy URL</button>
+                        
+                        <div class="instructions">
+                            <strong>How to use:</strong>
+                            <ol>
+                                <li>Copy the URL above</li>
+                                <li>In Claude.com, click the paperclip icon</li>
+                                <li>Select "Connect to MCP server"</li>
+                                <li>Paste your URL and connect</li>
+                            </ol>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `
+                        <h3>❌ Connection Failed</h3>
+                        <p>${data.error}</p>
+                        ${data.details ? `<p style="font-size: 12px; margin-top: 10px;">${data.details}</p>` : ''}
+                    `;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <h3>❌ Network Error</h3>
+                    <p>Failed to connect to the server. Please try again.</p>
+                `;
+            } finally {
+                resultDiv.style.display = 'block';
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = 'Connect to Printify';
+            }
+        });
+
+        function copyUrl() {
+            const urlText = document.getElementById('mcpUrl').textContent;
+            navigator.clipboard.writeText(urlText).then(() => {
+                const copyBtn = document.querySelector('.copy-btn');
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = '✓ Copied!';
+                setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>
