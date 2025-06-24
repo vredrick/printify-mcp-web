@@ -86,8 +86,78 @@ docker run -p 3000:3000 -e PORT=3000 -e BASE_URL=http://localhost:3000 printify-
 - `get-print-providers` - Get print providers for a blueprint
 - `get-variants` - Get variants (sizes, colors) for a product
 
-## Example Workflow
+## Available Prompts
 
+### 🎨 create-product-wizard
+Interactive wizard to guide you through creating a product with best practices
+- Parameters: productType, designDescription, targetAudience, priceRange
+- Helps with blueprint selection, pricing, and design preparation
+
+### 📦 bulk-product-generator  
+Generate multiple product variants from a single design
+- Parameters: designId, productTypes, basePrice, namePattern
+- Efficiently creates multiple products with consistent settings
+
+### 🖼️ design-upload-assistant
+Help prepare and upload designs with optimal settings
+- Parameters: designType, intendedProducts, hasTransparency, currentFormat
+- Ensures designs meet technical requirements
+
+### ✍️ product-description-writer
+Generate SEO-optimized product descriptions
+- Parameters: productName, targetKeywords, tone, features, idealCustomer
+- Creates compelling titles, descriptions, and tags
+
+## Available Resources
+
+### 📋 design-guidelines
+`printify://guidelines/design-requirements`
+- Comprehensive design requirements for all products
+- DPI, dimensions, safe zones, and file format specifications
+
+### 📏 size-charts
+`printify://reference/size-charts`
+- Standard size measurements for apparel products
+- Includes unisex, women's, and various product types
+
+### 💰 pricing-calculator
+`printify://tools/pricing-guide`
+- Pricing strategies (keystone, competitive, premium)
+- Profit margin calculations and tips
+
+### 📚 blueprint-catalog
+`printify://catalog/popular-blueprints`
+- Popular products organized by category
+- Includes pricing ranges and provider recommendations
+
+### 🚀 api-best-practices
+`printify://guides/api-best-practices`
+- Rate limits, error handling, and optimization tips
+- Image upload best practices and webhook information
+
+## Example Workflows
+
+### Using Prompts
+```javascript
+// Use the product creation wizard
+create-product-wizard({
+  productType: "t-shirt",
+  designDescription: "minimalist mountain landscape",
+  targetAudience: "outdoor enthusiasts",
+  priceRange: "mid-range"
+})
+
+// Generate SEO-optimized descriptions
+product-description-writer({
+  productName: "Mountain Adventure Tee",
+  targetKeywords: ["mountain", "hiking", "outdoor", "adventure"],
+  tone: "casual",
+  features: ["soft cotton", "eco-friendly", "unisex fit"],
+  idealCustomer: "hikers and nature lovers"
+})
+```
+
+### Traditional Tool Usage
 ```javascript
 // 1. Get blueprints
 get-blueprints()

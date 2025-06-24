@@ -370,6 +370,509 @@ function createUserMcpServer(session: UserSession) {
     }
   );
 
+  // ===== PROMPTS =====
+  
+  // Product creation wizard prompt
+  server.prompt(
+    'create-product-wizard',
+    'Interactive wizard to create a Printify product with best practices',
+    {
+      productType: z.string().describe('Type of product (t-shirt, mug, hoodie, etc)'),
+      designDescription: z.string().describe('Description of your design concept'),
+      targetAudience: z.string().optional().describe('Target customer demographic'),
+      priceRange: z.string().optional().describe('Desired price range (budget, mid-range, premium)')
+    },
+    async ({ productType, designDescription, targetAudience, priceRange }) => {
+      return {
+        messages: [{
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `I want to create a ${productType} product on Printify. 
+
+Design concept: ${designDescription}
+${targetAudience ? `Target audience: ${targetAudience}` : ''}
+${priceRange ? `Price range: ${priceRange}` : ''}
+
+Please help me:
+1. Find the best blueprint for a ${productType}
+2. Select an appropriate print provider based on quality and price
+3. Choose the right variants (sizes/colors) for my target market
+4. Set competitive pricing
+5. Generate or prepare my design for upload
+6. Create the product with optimal settings
+
+Guide me through each step and explain the best practices.`
+          }
+        }]
+      };
+    }
+  );
+
+  // Bulk product generator prompt
+  server.prompt(
+    'bulk-product-generator',
+    'Generate multiple product variants from a single design',
+    {
+      designId: z.string().describe('The uploaded design image ID'),
+      productTypes: z.array(z.string()).describe('List of product types to create'),
+      basePrice: z.number().describe('Base price in cents to calculate variants from'),
+      namePattern: z.string().describe('Pattern for product names (e.g., "{design} - {type}")')
+    },
+    async ({ designId, productTypes, basePrice, namePattern }) => {
+      return {
+        messages: [{
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `I need to create multiple products using design ID: ${designId}
+
+Product types to create: ${productTypes.join(', ')}
+Base price: $${(basePrice / 100).toFixed(2)}
+Naming pattern: ${namePattern}
+
+Please:
+1. Create a product for each type listed
+2. Apply the design to the main print area
+3. Enable popular sizes and colors
+4. Set pricing based on the base price (adjust for product cost)
+5. Use consistent naming following the pattern
+6. Provide a summary of all created products
+
+Optimize for efficiency while maintaining quality settings.`
+          }
+        }]
+      };
+    }
+  );
+
+  // Design upload assistant prompt
+  server.prompt(
+    'design-upload-assistant',
+    'Help prepare and upload designs with optimal settings',
+    {
+      designType: z.string().describe('Type of design (logo, pattern, illustration, photo)'),
+      intendedProducts: z.array(z.string()).describe('Products this design will be used on'),
+      hasTransparency: z.boolean().describe('Whether the design needs transparency'),
+      currentFormat: z.string().optional().describe('Current file format if known')
+    },
+    async ({ designType, intendedProducts, hasTransparency, currentFormat }) => {
+      return {
+        messages: [{
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `I need help uploading a ${designType} design for Printify.
+
+Intended products: ${intendedProducts.join(', ')}
+Needs transparency: ${hasTransparency ? 'Yes' : 'No'}
+${currentFormat ? `Current format: ${currentFormat}` : ''}
+
+Please help me:
+1. Verify the design meets requirements (DPI, dimensions, format)
+2. Explain any necessary preparations or conversions
+3. Upload the design with optimal settings
+4. Provide placement recommendations for each product type
+5. Suggest any design adjustments for better print quality
+
+Include specific technical requirements and best practices.`
+          }
+        }]
+      };
+    }
+  );
+
+  // Product description writer prompt
+  server.prompt(
+    'product-description-writer',
+    'Generate SEO-optimized product descriptions',
+    {
+      productName: z.string().describe('Name of the product'),
+      targetKeywords: z.array(z.string()).describe('SEO keywords to include'),
+      tone: z.string().describe('Writing tone (professional, casual, playful, luxury)'),
+      features: z.array(z.string()).describe('Key product features to highlight'),
+      idealCustomer: z.string().optional().describe('Description of ideal customer')
+    },
+    async ({ productName, targetKeywords, tone, features, idealCustomer }) => {
+      return {
+        messages: [{
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `Write an SEO-optimized product description for: ${productName}
+
+Target keywords: ${targetKeywords.join(', ')}
+Tone: ${tone}
+Key features: ${features.join(', ')}
+${idealCustomer ? `Ideal customer: ${idealCustomer}` : ''}
+
+Create:
+1. A compelling title (50-60 characters)
+2. A short description (150-160 characters) 
+3. A detailed description (300-500 words)
+4. 5-7 relevant tags
+5. Key selling points in bullet format
+
+Naturally incorporate keywords while maintaining readability and conversion focus.`
+          }
+        }]
+      };
+    }
+  );
+
+  // ===== RESOURCES =====
+
+  // Design guidelines resource
+  server.resource(
+    'design-guidelines',
+    'printify://guidelines/design-requirements',
+    { 
+      mimeType: 'application/json',
+      description: 'Comprehensive design requirements for all Printify products'
+    },
+    async () => {
+      const guidelines = {
+        general: {
+          dpi: 300,
+          colorMode: 'RGB',
+          recommendedFormats: ['PNG', 'JPG'],
+          maxFileSize: '25MB'
+        },
+        products: {
+          tshirt: {
+            printArea: { width: 4500, height: 5400 },
+            safeZone: '0.125 inches from edges',
+            placement: 'Center chest, 3-4 inches from collar'
+          },
+          mug: {
+            printArea: { width: 2700, height: 1200 },
+            safeZone: '0.25 inches from edges',
+            wraparound: true
+          },
+          hoodie: {
+            printArea: { width: 4500, height: 5400 },
+            pocketPrint: { width: 1200, height: 1200 },
+            safeZone: '0.125 inches from edges'
+          },
+          poster: {
+            printArea: 'Full bleed supported',
+            bleed: '0.125 inches',
+            safeZone: '0.25 inches for text'
+          }
+        },
+        tips: [
+          'Use PNG for designs with transparency',
+          'Ensure text is converted to outlines',
+          'Check design at 100% size before upload',
+          'Avoid very thin lines (minimum 2pt)',
+          'Test print colors may vary from screen'
+        ]
+      };
+      
+      return {
+        contents: [{
+          uri: 'printify://guidelines/design-requirements',
+          text: JSON.stringify(guidelines, null, 2)
+        }]
+      };
+    }
+  );
+
+  // Size charts resource
+  server.resource(
+    'size-charts',
+    'printify://reference/size-charts',
+    { 
+      mimeType: 'application/json',
+      description: 'Standard size charts for apparel products'
+    },
+    async () => {
+      const sizeCharts = {
+        unisexTShirt: {
+          units: 'inches',
+          sizes: {
+            S: { chest: '34-36', length: 28 },
+            M: { chest: '38-40', length: 29 },
+            L: { chest: '42-44', length: 30 },
+            XL: { chest: '46-48', length: 31 },
+            '2XL': { chest: '50-52', length: 32 },
+            '3XL': { chest: '54-56', length: 33 }
+          }
+        },
+        womensTShirt: {
+          units: 'inches',
+          sizes: {
+            S: { chest: '30-32', length: 25.5 },
+            M: { chest: '32-34', length: 26 },
+            L: { chest: '36-38', length: 27 },
+            XL: { chest: '40-42', length: 28 }
+          }
+        },
+        hoodie: {
+          units: 'inches', 
+          sizes: {
+            S: { chest: '38-40', length: 27 },
+            M: { chest: '42-44', length: 28 },
+            L: { chest: '46-48', length: 29 },
+            XL: { chest: '50-52', length: 30 },
+            '2XL': { chest: '54-56', length: 31 }
+          }
+        }
+      };
+      
+      return {
+        contents: [{
+          uri: 'printify://reference/size-charts',
+          text: JSON.stringify(sizeCharts, null, 2)
+        }]
+      };
+    }
+  );
+
+  // Pricing calculator resource
+  server.resource(
+    'pricing-calculator',
+    'printify://tools/pricing-guide',
+    { 
+      mimeType: 'application/json',
+      description: 'Pricing strategies and profit margin calculator'
+    },
+    async () => {
+      const pricingGuide = {
+        strategies: {
+          keystone: {
+            description: 'Double the total cost',
+            formula: 'Retail Price = (Base Cost + Shipping) × 2',
+            profitMargin: '50%'
+          },
+          competitive: {
+            description: 'Market-based pricing',
+            formula: 'Retail Price = Average Market Price',
+            profitMargin: 'Varies (typically 30-40%)'
+          },
+          premium: {
+            description: 'High-end positioning',
+            formula: 'Retail Price = (Base Cost + Shipping) × 2.5-3',
+            profitMargin: '60-70%'
+          }
+        },
+        calculations: {
+          profitMargin: '(Retail Price - Total Cost) / Retail Price × 100',
+          breakEven: 'Fixed Costs / (Retail Price - Variable Cost)',
+          recommendedMinimum: '30% profit margin'
+        },
+        tips: [
+          'Consider shipping costs in your pricing',
+          'Account for marketplace fees (Etsy, Shopify)',
+          'Test different price points',
+          'Bundle products for higher average order value',
+          'Offer volume discounts strategically'
+        ]
+      };
+      
+      return {
+        contents: [{
+          uri: 'printify://tools/pricing-guide',
+          text: JSON.stringify(pricingGuide, null, 2)
+        }]
+      };
+    }
+  );
+
+  // Blueprint catalog resource
+  server.resource(
+    'blueprint-catalog',
+    'printify://catalog/popular-blueprints',
+    { 
+      mimeType: 'application/json',
+      description: 'Popular Printify product blueprints with recommendations'
+    },
+    async () => {
+      const blueprintCatalog = {
+        apparel: {
+          tshirts: [
+            {
+              id: 12,
+              name: 'Unisex Cotton T-Shirt',
+              popularity: 'Very High',
+              priceRange: '$8-12',
+              bestFor: 'General audience, comfortable everyday wear',
+              providers: ['Monster Digital', 'Print Geek', 'FYBY']
+            },
+            {
+              id: 281,
+              name: 'Unisex Cut & Sew Tee (AOP)',
+              popularity: 'High',
+              priceRange: '$15-22',
+              bestFor: 'All-over prints, patterns, artistic designs',
+              providers: ['Subliminator', 'Print Your Cause']
+            }
+          ],
+          hoodies: [
+            {
+              id: 85,
+              name: 'Unisex Heavy Blend Hoodie',
+              popularity: 'Very High',
+              priceRange: '$25-35',
+              bestFor: 'Cold weather, casual streetwear',
+              providers: ['Monster Digital', 'SwiftPOD']
+            }
+          ],
+          longsleeves: [
+            {
+              id: 428,
+              name: 'Unisex Long Sleeve Tee',
+              popularity: 'Medium',
+              priceRange: '$12-18',
+              bestFor: 'Cooler weather, professional casual',
+              providers: ['Monster Digital', 'FYBY']
+            }
+          ]
+        },
+        accessories: {
+          mugs: [
+            {
+              id: 19,
+              name: 'White Glossy Mug',
+              popularity: 'Very High',
+              priceRange: '$10-15',
+              bestFor: 'Gifts, office use, simple designs',
+              providers: ['District Photo', 'Print Geek']
+            }
+          ],
+          toteBags: [
+            {
+              id: 517,
+              name: 'Canvas Tote Bag',
+              popularity: 'High',
+              priceRange: '$12-18',
+              bestFor: 'Eco-friendly shoppers, minimalist designs',
+              providers: ['Bags of Love USA', 'Print Logistic']
+            }
+          ],
+          phoneCases: [
+            {
+              id: 302,
+              name: 'Clear Case for iPhone®',
+              popularity: 'Medium',
+              priceRange: '$15-20',
+              bestFor: 'Tech accessories, personalized gifts',
+              providers: ['Prisma', 'Case Escape']
+            }
+          ]
+        },
+        homeDecor: {
+          posters: [
+            {
+              id: 1,
+              name: 'Posters',
+              popularity: 'High',
+              priceRange: '$10-25',
+              bestFor: 'Wall art, photography, illustrations',
+              providers: ['Prodigi', 'Printify']
+            }
+          ],
+          canvases: [
+            {
+              id: 30,
+              name: 'Canvas Gallery Wraps',
+              popularity: 'Medium',
+              priceRange: '$25-50',
+              bestFor: 'Premium wall art, photography',
+              providers: ['Dream Junction', 'Prodigi']
+            }
+          ]
+        },
+        seasonal: {
+          ornaments: {
+            availability: 'September-December',
+            popularBlueprints: [447, 632, 741]
+          },
+          beachTowels: {
+            availability: 'March-August',
+            popularBlueprints: [559, 612]
+          }
+        }
+      };
+      
+      return {
+        contents: [{
+          uri: 'printify://catalog/popular-blueprints',
+          text: JSON.stringify(blueprintCatalog, null, 2)
+        }]
+      };
+    }
+  );
+
+  // API best practices resource
+  server.resource(
+    'api-best-practices',
+    'printify://guides/api-best-practices',
+    { 
+      mimeType: 'application/json',
+      description: 'Best practices for using the Printify API efficiently'
+    },
+    async () => {
+      const bestPractices = {
+        rateLimits: {
+          standard: '120 requests per minute',
+          burst: 'Up to 10 concurrent requests',
+          recommendation: 'Implement exponential backoff on 429 errors'
+        },
+        efficiency: {
+          batching: [
+            'Create multiple variants in a single product creation',
+            'Use bulk operations when available',
+            'Cache blueprint and provider data locally'
+          ],
+          pagination: [
+            'Use limit parameter (max 100)',
+            'Process results in parallel when possible',
+            'Store cursor for resumable operations'
+          ]
+        },
+        imageOptimization: {
+          upload: [
+            'Compress images before upload (85% JPEG quality)',
+            'Use appropriate dimensions for product type',
+            'Upload once, reuse image ID for multiple products'
+          ],
+          formats: {
+            transparent: 'PNG (for logos, text)',
+            photos: 'JPEG (smaller file size)',
+            vectors: 'Convert to high-res PNG first'
+          }
+        },
+        errorHandling: {
+          common: {
+            401: 'Check API key validity',
+            404: 'Verify resource IDs',
+            422: 'Validate request payload',
+            429: 'Implement rate limit backoff',
+            500: 'Retry with exponential backoff'
+          }
+        },
+        webhooks: {
+          events: [
+            'product.created',
+            'product.updated', 
+            'product.deleted',
+            'order.created',
+            'order.shipped'
+          ],
+          tip: 'Use webhooks instead of polling for real-time updates'
+        }
+      };
+      
+      return {
+        contents: [{
+          uri: 'printify://guides/api-best-practices',
+          text: JSON.stringify(bestPractices, null, 2)
+        }]
+      };
+    }
+  );
+
   return server;
 }
 
