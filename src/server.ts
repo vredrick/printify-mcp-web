@@ -211,7 +211,7 @@ function createUserMcpServer(session: UserSession) {
     "create-product-simple",
     {
       title: z.string().describe("Product title"),
-      description: z.string().describe("Product description"),
+      description: z.string().optional().default("").describe("Product description"),
       blueprintId: z.number().describe("Blueprint ID (use get-popular-blueprints for common IDs)"),
       imageId: z.string().describe("Image ID from upload-image"),
       profitMargin: z.string().optional().default("50%").describe("Profit margin (e.g., '50%' or '100%')"),
@@ -275,7 +275,11 @@ function createUserMcpServer(session: UserSession) {
           printAreas: {
             front: {
               position: 'front',
-              imageId
+              imageId,
+              x: 0,
+              y: 0,
+              scale: 1,
+              angle: 0
             }
           }
         };
