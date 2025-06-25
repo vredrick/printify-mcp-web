@@ -33,6 +33,28 @@ export interface PrintifyShop {
   sales_channel: string;
 }
 
+// Blueprint categories for searching
+export const BLUEPRINT_CATEGORIES = {
+  apparel: {
+    tshirt: [5, 12, 384, 921], // Various t-shirt blueprints
+    hoodie: [6, 77, 380],
+    tanktop: [17, 387],
+    longsleeve: [245, 378]
+  },
+  accessories: {
+    mug: [265, 635, 1041],
+    totebag: [634, 821],
+    phonecase: [269, 555],
+    sticker: [1037, 1201]
+  },
+  home: {
+    poster: [520, 521],
+    canvas: [446, 1158],
+    blanket: [647, 961],
+    pillow: [560, 1052]
+  }
+} as const;
+
 export interface PrintifyProduct {
   id: string;
   title: string;
@@ -143,23 +165,23 @@ export class PrintifyAPI {
             errorMessage += ` - ${errorText}`;
           }
 
-          // Map status codes to error codes
+          // Map status codes to error codes with helpful recovery messages
           let errorCode = PrintifyErrorCode.UNKNOWN_ERROR;
           if (response.status === 401) {
             errorCode = PrintifyErrorCode.AUTH_FAILED;
-            errorMessage += '. Please check that your API key is valid and active in your Printify account settings.';
+            errorMessage += '\n\nTo fix:\n1. Check your Printify API key is valid\n2. Ensure the key is active in your account\n3. Try generating a new API key at printify.com';
           } else if (response.status === 429) {
             errorCode = PrintifyErrorCode.RATE_LIMIT;
-            errorMessage += '. Rate limit exceeded. Please wait a moment and try again.';
+            errorMessage += '\n\nTo fix:\n1. Wait 60 seconds before retrying\n2. Reduce the number of requests\n3. Use smaller page limits for list operations';
           } else if (response.status === 404) {
             errorCode = PrintifyErrorCode.NOT_FOUND;
-            errorMessage += '. The requested resource was not found. It may have been deleted or the ID is incorrect.';
+            errorMessage += '\n\nTo fix:\n1. Verify the ID exists (use list operations)\n2. Check you\'re using the correct shop\n3. Ensure the resource wasn\'t deleted';
           } else if (response.status === 400 || response.status === 422) {
             errorCode = PrintifyErrorCode.VALIDATION_ERROR;
-            errorMessage += '. Request validation failed. Check your input parameters.';
+            errorMessage += '\n\nTo fix:\n1. Check all required fields are provided\n2. Verify data types (numbers vs strings)\n3. Use example values from tool descriptions';
           } else if (response.status >= 500) {
             errorCode = PrintifyErrorCode.SERVER_ERROR;
-            errorMessage += '. Printify server error. Please try again later.';
+            errorMessage += '\n\nTo fix:\n1. Wait a few minutes and retry\n2. Check Printify status page\n3. Try a simpler request to test connectivity';
           }
 
           if (debugMode) {
@@ -274,23 +296,23 @@ export class PrintifyAPI {
             errorMessage += ` - ${errorText}`;
           }
 
-          // Map status codes to error codes
+          // Map status codes to error codes with helpful recovery messages
           let errorCode = PrintifyErrorCode.UNKNOWN_ERROR;
           if (response.status === 401) {
             errorCode = PrintifyErrorCode.AUTH_FAILED;
-            errorMessage += '. Please check that your API key is valid and active in your Printify account settings.';
+            errorMessage += '\n\nTo fix:\n1. Check your Printify API key is valid\n2. Ensure the key is active in your account\n3. Try generating a new API key at printify.com';
           } else if (response.status === 429) {
             errorCode = PrintifyErrorCode.RATE_LIMIT;
-            errorMessage += '. Rate limit exceeded. Please wait a moment and try again.';
+            errorMessage += '\n\nTo fix:\n1. Wait 60 seconds before retrying\n2. Reduce the number of requests\n3. Use smaller page limits for list operations';
           } else if (response.status === 404) {
             errorCode = PrintifyErrorCode.NOT_FOUND;
-            errorMessage += '. The requested resource was not found. It may have been deleted or the ID is incorrect.';
+            errorMessage += '\n\nTo fix:\n1. Verify the ID exists (use list operations)\n2. Check you\'re using the correct shop\n3. Ensure the resource wasn\'t deleted';
           } else if (response.status === 400 || response.status === 422) {
             errorCode = PrintifyErrorCode.VALIDATION_ERROR;
-            errorMessage += '. Request validation failed. Check your input parameters.';
+            errorMessage += '\n\nTo fix:\n1. Check all required fields are provided\n2. Verify data types (numbers vs strings)\n3. Use example values from tool descriptions';
           } else if (response.status >= 500) {
             errorCode = PrintifyErrorCode.SERVER_ERROR;
-            errorMessage += '. Printify server error. Please try again later.';
+            errorMessage += '\n\nTo fix:\n1. Wait a few minutes and retry\n2. Check Printify status page\n3. Try a simpler request to test connectivity';
           }
 
           if (debugMode) {
@@ -439,10 +461,10 @@ export class PrintifyAPI {
             position: area.position,
             images: [{
               id: area.imageId,
-              x: 0,
-              y: 0,
-              scale: 1,
-              angle: 0
+              x: area.x || 0,
+              y: area.y || 0,
+              scale: area.scale || 1,
+              angle: area.angle || 0
             }]
           }]
         })) : []
@@ -747,5 +769,115 @@ export class PrintifyAPI {
 
   async getVariants(blueprintId: string, printProviderId: string): Promise<any> {
     return this.makeRequest(`/catalog/blueprints/${blueprintId}/print_providers/${printProviderId}/variants.json`);
+  }
+
+  // Search blueprints by category and type
+  async searchBlueprints(category?: string, type?: string): Promise<any> {
+    const allBlueprints = await this.getBlueprints(1, 50);
+    
+    if (!category && !type) {
+      return allBlueprints;
+    }
+
+    // If using fallback data, filter it
+    if (allBlueprints._fallback) {
+      const categoryData = category ? (BLUEPRINT_CATEGORIES as any)[category] : null;
+      const blueprintIds = category && type && categoryData?.[type] 
+        ? categoryData[type]
+        : Object.values(BLUEPRINT_CATEGORIES).flatMap(cat => 
+            Object.values(cat).flat()
+          );
+      
+      const filtered = {
+        ...allBlueprints,
+        data: allBlueprints.data.filter((bp: any) => blueprintIds.includes(bp.id)),
+        total: allBlueprints.data.filter((bp: any) => blueprintIds.includes(bp.id)).length
+      };
+      
+      return filtered;
+    }
+
+    // For real API data, filter by title/description
+    const searchTerms: string[] = [];
+    if (type) searchTerms.push(type.toLowerCase());
+    if (category) searchTerms.push(category.toLowerCase());
+    
+    const filtered = {
+      ...allBlueprints,
+      data: allBlueprints.data.filter((bp: any) => {
+        const searchText = `${bp.title} ${bp.description || ''}`.toLowerCase();
+        return searchTerms.some(term => searchText.includes(term));
+      })
+    };
+    
+    filtered.total = filtered.data.length;
+    return filtered;
+  }
+
+  // Get popular blueprints for quick access
+  async getPopularBlueprints(): Promise<any> {
+    const popularIds = [
+      5,   // Bella + Canvas 3001 T-Shirt
+      6,   // Gildan 18500 Hoodie
+      265, // Ceramic Mug 11oz
+      634, // Tote Bag
+      520, // Poster
+      1037 // Sticker
+    ];
+
+    try {
+      const allBlueprints = await this.getBlueprints(1, 20);
+      
+      if (allBlueprints._fallback) {
+        return allBlueprints; // Fallback already contains popular items
+      }
+
+      // Filter to popular items
+      const filtered = {
+        ...allBlueprints,
+        data: allBlueprints.data.filter((bp: any) => popularIds.includes(bp.id)),
+        total: allBlueprints.data.filter((bp: any) => popularIds.includes(bp.id)).length,
+        _popular: true
+      };
+
+      return filtered;
+    } catch (error) {
+      // Return curated popular list
+      return {
+        data: [
+          { id: 5, title: 'Bella + Canvas 3001 T-Shirt', brand: 'Bella + Canvas', _popular: true },
+          { id: 6, title: 'Gildan 18500 Hoodie', brand: 'Gildan', _popular: true },
+          { id: 265, title: 'Ceramic Mug 11oz', brand: 'Generic', _popular: true },
+          { id: 634, title: 'Tote Bag', brand: 'Generic', _popular: true },
+          { id: 520, title: 'Poster', brand: 'Generic', _popular: true },
+          { id: 1037, title: 'Sticker', brand: 'Generic', _popular: true }
+        ],
+        total: 6,
+        _fallback: true,
+        _popular: true
+      };
+    }
+  }
+
+  // Calculate pricing based on base cost and desired profit margin
+  calculatePricing(baseCost: number, profitMargin: number | string): { price: number; profit: number } {
+    // Convert profit margin to number if it's a percentage string
+    let margin = typeof profitMargin === 'string' 
+      ? parseFloat(profitMargin.replace('%', '')) / 100
+      : profitMargin;
+
+    // If margin is greater than 1, assume it's a percentage (e.g., 50 instead of 0.5)
+    if (margin > 1) {
+      margin = margin / 100;
+    }
+
+    // Calculate price based on margin
+    const price = Math.round(baseCost / (1 - margin));
+    const profit = price - baseCost;
+
+    return {
+      price, // Price in cents
+      profit // Profit in cents
+    };
   }
 }

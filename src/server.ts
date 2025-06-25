@@ -188,8 +188,12 @@ function createUserMcpServer(session: UserSession) {
       })).describe("Product variants with pricing"),
       printAreas: z.record(z.string(), z.object({
         position: z.string().describe("Print position (e.g., 'front', 'back')"),
-        imageId: z.string().describe("Image ID from upload-image")
-      })).optional().describe("Design placement on product")
+        imageId: z.string().describe("Image ID from upload-image"),
+        x: z.number().optional().default(0).describe("Horizontal position (0-1, default: 0 for center)"),
+        y: z.number().optional().default(0).describe("Vertical position (0-1, default: 0 for center)"),
+        scale: z.number().optional().default(1).describe("Scale factor (0.5-2, default: 1)"),
+        angle: z.number().optional().default(0).describe("Rotation angle in degrees (default: 0)")
+      })).optional().describe("Design placement on product with positioning")
     },
     async (params) => {
       const product = await session.printifyClient.createProduct(params);
@@ -199,6 +203,128 @@ function createUserMcpServer(session: UserSession) {
           text: JSON.stringify(product, null, 2)
         }]
       };
+    }
+  );
+
+  // Simplified product creation tool
+  server.tool(
+    "create-product-simple",
+    {
+      title: z.string().describe("Product title"),
+      description: z.string().describe("Product description"),
+      blueprintId: z.number().describe("Blueprint ID (use get-popular-blueprints for common IDs)"),
+      imageId: z.string().describe("Image ID from upload-image"),
+      profitMargin: z.string().optional().default("50%").describe("Profit margin (e.g., '50%' or '100%')"),
+      includeColors: z.string().optional().default("white,black").describe("Comma-separated colors to include"),
+      includeSizes: z.string().optional().default("M,L,XL,2XL").describe("Comma-separated sizes to include")
+    },
+    async ({ title, description, blueprintId, imageId, profitMargin, includeColors, includeSizes }) => {
+      try {
+        // Get blueprint details first
+        const blueprint = await session.printifyClient.getBlueprint(blueprintId.toString());
+        
+        // Use first available print provider
+        const providers = await session.printifyClient.getPrintProviders(blueprintId.toString());
+        if (!providers || providers.length === 0) {
+          throw new Error('No print providers available for this blueprint');
+        }
+        
+        const printProviderId = providers[0].id;
+        
+        // Get variants
+        const variantsData = await session.printifyClient.getVariants(
+          blueprintId.toString(), 
+          printProviderId.toString()
+        );
+        
+        // Parse requested colors and sizes
+        const requestedColors = includeColors.toLowerCase().split(',').map(c => c.trim());
+        const requestedSizes = includeSizes.toUpperCase().split(',').map(s => s.trim());
+        
+        // Filter and price variants
+        const variants = variantsData.variants
+          .filter((v: any) => {
+            const colorMatch = requestedColors.some(color => 
+              v.title.toLowerCase().includes(color)
+            );
+            const sizeMatch = requestedSizes.some(size => 
+              v.title.includes(size)
+            );
+            return colorMatch && sizeMatch;
+          })
+          .map((v: any) => {
+            const pricing = session.printifyClient.calculatePricing(v.cost, profitMargin);
+            return {
+              variantId: v.id,
+              price: pricing.price,
+              isEnabled: true
+            };
+          });
+
+        if (variants.length === 0) {
+          throw new Error('No variants match the requested colors and sizes');
+        }
+
+        // Create product with simplified parameters
+        const productData = {
+          title,
+          description,
+          blueprintId,
+          printProviderId,
+          variants,
+          printAreas: {
+            front: {
+              position: 'front',
+              imageId
+            }
+          }
+        };
+
+        const product = await session.printifyClient.createProduct(productData);
+        
+        return {
+          content: [{
+            type: "text",
+            text: `Product created successfully!
+
+Title: ${product.title}
+ID: ${product.id}
+Blueprint: ${blueprint.title}
+Variants enabled: ${variants.length}
+Profit margin: ${profitMargin}
+
+Product details:
+${JSON.stringify(product, null, 2)}
+
+Next steps:
+- Use publish-product to make it available in your store
+- Use update-product to modify details
+- Use get-product to view current status`
+          }]
+        };
+      } catch (error: any) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error creating product: ${error.message}
+
+Common issues:
+- Invalid blueprint ID (use get-popular-blueprints for valid IDs)
+- Image not uploaded (use upload-image first)
+- No variants match colors/sizes (try 'white,black' and 'S,M,L,XL')
+
+Example usage:
+create-product-simple
+  title: "Cool T-Shirt"
+  description: "Amazing design"
+  blueprintId: 5
+  imageId: "your-image-id"
+  profitMargin: "50%"
+  includeColors: "white,black"
+  includeSizes: "M,L,XL"`
+          }]
+        };
+      }
     }
   );
 
@@ -284,6 +410,94 @@ function createUserMcpServer(session: UserSession) {
         content: [{
           type: "text",
           text: JSON.stringify(image, null, 2)
+        }]
+      };
+    }
+  );
+
+  // Search blueprints tool
+  server.tool(
+    "search-blueprints",
+    {
+      category: z.string().optional().describe("Category: 'apparel', 'accessories', or 'home'"),
+      type: z.string().optional().describe("Type: 'tshirt', 'hoodie', 'mug', 'totebag', 'poster', etc.")
+    },
+    async ({ category, type }) => {
+      try {
+        const blueprints = await session.printifyClient.searchBlueprints(category, type);
+        
+        // Add helpful message based on search
+        let message = '';
+        if (category && type) {
+          message = `Showing ${type} products in ${category} category:\n\n`;
+        } else if (category) {
+          message = `Showing all products in ${category} category:\n\n`;
+        } else if (type) {
+          message = `Showing all ${type} products:\n\n`;
+        }
+        
+        return {
+          content: [{
+            type: "text",
+            text: message + JSON.stringify(blueprints, null, 2)
+          }]
+        };
+      } catch (error: any) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error searching blueprints: ${error.message}\n\nTry:\n- Using a valid category: 'apparel', 'accessories', or 'home'\n- Using a valid type: 'tshirt', 'hoodie', 'mug', etc.\n- Calling get-popular-blueprints for quick access to common products`
+          }]
+        };
+      }
+    }
+  );
+
+  // Get popular blueprints tool
+  server.tool(
+    "get-popular-blueprints",
+    {},
+    async () => {
+      try {
+        const blueprints = await session.printifyClient.getPopularBlueprints();
+        
+        return {
+          content: [{
+            type: "text",
+            text: `Popular blueprints for quick product creation:\n\n${JSON.stringify(blueprints, null, 2)}\n\nUse these blueprint IDs with create-product or create-product-simple for faster setup.`
+          }]
+        };
+      } catch (error: any) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error getting popular blueprints: ${error.message}`
+          }]
+        };
+      }
+    }
+  );
+
+  // Calculate pricing tool
+  server.tool(
+    "calculate-pricing",
+    {
+      baseCost: z.number().describe("Base cost in cents (e.g., 1200 for $12.00)"),
+      profitMargin: z.string().describe("Desired profit margin (e.g., '50%' or '0.5')")
+    },
+    async ({ baseCost, profitMargin }) => {
+      const pricing = session.printifyClient.calculatePricing(baseCost, profitMargin);
+      
+      return {
+        content: [{
+          type: "text",
+          text: `Pricing calculation:
+Base cost: $${(baseCost / 100).toFixed(2)}
+Profit margin: ${profitMargin}
+Selling price: $${(pricing.price / 100).toFixed(2)}
+Profit per sale: $${(pricing.profit / 100).toFixed(2)}
+
+Use ${pricing.price} as the price when creating variants.`
         }]
       };
     }
