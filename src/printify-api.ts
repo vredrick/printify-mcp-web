@@ -36,8 +36,8 @@ export interface PrintifyShop {
 // Blueprint categories for searching
 export const BLUEPRINT_CATEGORIES = {
   apparel: {
-    tshirt: [5, 12, 384, 921], // Various t-shirt blueprints
-    hoodie: [6, 77, 380],
+    tshirt: [5, 6, 12, 384, 921], // Various t-shirt blueprints (6 is Gildan 64000 T-Shirt)
+    hoodie: [77, 380], // 77 is Gildan 18500 Hoodie
     tanktop: [17, 387],
     longsleeve: [245, 378]
   },
@@ -684,11 +684,18 @@ export class PrintifyAPI {
           model: '3001'
         },
         { 
-          id: 6, 
+          id: 77, 
           title: 'Gildan 18500 Unisex Hoodie', 
           description: 'Classic pullover hoodie',
           brand: 'Gildan',
           model: '18500'
+        },
+        { 
+          id: 6, 
+          title: 'Gildan 64000 Unisex T-Shirt',
+          description: 'Affordable basic t-shirt',
+          brand: 'Gildan',
+          model: '64000'
         },
         { 
           id: 384, 
@@ -696,13 +703,6 @@ export class PrintifyAPI {
           description: 'Tri-blend fabric for ultimate softness',
           brand: 'Bella + Canvas',
           model: '3413'
-        },
-        { 
-          id: 12, 
-          title: 'Gildan 64000 Unisex T-Shirt',
-          description: 'Affordable basic t-shirt',
-          brand: 'Gildan',
-          model: '64000'
         },
         { 
           id: 265, 
@@ -779,47 +779,65 @@ export class PrintifyAPI {
       allBlueprints = await this.getBlueprints(1, 50);
     } catch (error: any) {
       // If API fails, use fallback data for searching
-      console.log('Failed to fetch blueprints, using fallback data for search');
-      
+      console.log('Failed to fetch blueprints, using fallback data for search:', error.message);
+      allBlueprints = null;
+    }
+    
+    // Ensure we always have valid blueprint data
+    if (!allBlueprints || !allBlueprints.data || !Array.isArray(allBlueprints.data)) {
       // Create fallback response with searchable data
       allBlueprints = {
         data: [
           { id: 5, title: 'Bella + Canvas 3001 Unisex T-Shirt', description: 'Premium unisex t-shirt' },
-          { id: 6, title: 'Gildan 18500 Unisex Hoodie', description: 'Classic pullover hoodie' },
-          { id: 77, title: 'Champion S700 Hoodie', description: 'Premium hoodie' },
+          { id: 77, title: 'Gildan 18500 Unisex Hoodie', description: 'Classic pullover hoodie' },
+          { id: 6, title: 'Gildan 64000 Unisex T-Shirt', description: 'Basic t-shirt' },
           { id: 380, title: 'Independent Trading Co. Hoodie', description: 'Heavy blend hoodie' },
           { id: 265, title: 'Ceramic Mug 11oz', description: 'Standard coffee mug' },
           { id: 634, title: 'Tote Bag', description: 'Canvas tote bag' },
           { id: 520, title: 'Poster', description: 'Wall poster' },
           { id: 1037, title: 'Sticker', description: 'Die-cut vinyl stickers' },
-          { id: 12, title: 'Gildan 64000 Unisex T-Shirt', description: 'Basic t-shirt' },
+          { id: 12, title: 'Next Level 3600 T-Shirt', description: 'Premium fitted t-shirt' },
           { id: 384, title: 'Bella + Canvas 3413 Triblend T-shirt', description: 'Tri-blend t-shirt' }
         ],
         _fallback: true,
-        _message: 'Using fallback data due to API error'
+        _message: 'Using cached blueprint data'
       };
     }
     
+    // Return all blueprints if no search criteria
     if (!category && !type) {
       return allBlueprints;
     }
 
-    // If using fallback data, filter it
+    // If using fallback data, filter by known categories
     if (allBlueprints._fallback) {
       const categoryData = category ? (BLUEPRINT_CATEGORIES as any)[category] : null;
-      const blueprintIds = category && type && categoryData?.[type] 
-        ? categoryData[type]
-        : Object.values(BLUEPRINT_CATEGORIES).flatMap(cat => 
-            Object.values(cat).flat()
-          );
+      let filteredData = allBlueprints.data;
       
-      const filtered = {
+      // Filter by category and type using known IDs
+      if (category && type && categoryData?.[type]) {
+        const blueprintIds = categoryData[type];
+        filteredData = allBlueprints.data.filter((bp: any) => blueprintIds.includes(bp.id));
+      } else {
+        // Filter by text search on title/description
+        const searchTerms: string[] = [];
+        if (type) searchTerms.push(type.toLowerCase());
+        if (category) searchTerms.push(category.toLowerCase());
+        
+        if (searchTerms.length > 0) {
+          filteredData = allBlueprints.data.filter((bp: any) => {
+            const searchText = `${bp.title} ${bp.description || ''}`.toLowerCase();
+            return searchTerms.some(term => searchText.includes(term));
+          });
+        }
+      }
+      
+      return {
         ...allBlueprints,
-        data: allBlueprints.data.filter((bp: any) => blueprintIds.includes(bp.id)),
-        total: allBlueprints.data.filter((bp: any) => blueprintIds.includes(bp.id)).length
+        data: filteredData,
+        total: filteredData.length,
+        _filtered: true
       };
-      
-      return filtered;
     }
 
     // For real API data, filter by title/description
@@ -827,23 +845,28 @@ export class PrintifyAPI {
     if (type) searchTerms.push(type.toLowerCase());
     if (category) searchTerms.push(category.toLowerCase());
     
-    const filtered = {
-      ...allBlueprints,
-      data: allBlueprints.data.filter((bp: any) => {
-        const searchText = `${bp.title} ${bp.description || ''}`.toLowerCase();
-        return searchTerms.some(term => searchText.includes(term));
-      })
-    };
+    // Ensure data exists before filtering
+    const dataToFilter = allBlueprints.data || [];
+    const filteredData = searchTerms.length > 0 
+      ? dataToFilter.filter((bp: any) => {
+          const searchText = `${bp.title || ''} ${bp.description || ''}`.toLowerCase();
+          return searchTerms.some(term => searchText.includes(term));
+        })
+      : dataToFilter;
     
-    filtered.total = filtered.data.length;
-    return filtered;
+    return {
+      ...allBlueprints,
+      data: filteredData,
+      total: filteredData.length,
+      _filtered: searchTerms.length > 0
+    };
   }
 
   // Get popular blueprints for quick access
   async getPopularBlueprints(): Promise<any> {
     const popularIds = [
       5,   // Bella + Canvas 3001 T-Shirt
-      6,   // Gildan 18500 Hoodie
+      77,  // Gildan 18500 Hoodie (corrected from ID 6)
       265, // Ceramic Mug 11oz
       634, // Tote Bag
       520, // Poster
@@ -854,7 +877,14 @@ export class PrintifyAPI {
       const allBlueprints = await this.getBlueprints(1, 20);
       
       if (allBlueprints._fallback) {
-        return allBlueprints; // Fallback already contains popular items
+        // Filter fallback data to just popular items
+        const popularData = allBlueprints.data.filter((bp: any) => popularIds.includes(bp.id));
+        return {
+          ...allBlueprints,
+          data: popularData,
+          total: popularData.length,
+          _popular: true
+        };
       }
 
       // Filter to popular items
@@ -867,15 +897,15 @@ export class PrintifyAPI {
 
       return filtered;
     } catch (error) {
-      // Return curated popular list
+      // Return curated popular list with correct data
       return {
         data: [
-          { id: 5, title: 'Bella + Canvas 3001 T-Shirt', brand: 'Bella + Canvas', _popular: true },
-          { id: 6, title: 'Gildan 18500 Hoodie', brand: 'Gildan', _popular: true },
-          { id: 265, title: 'Ceramic Mug 11oz', brand: 'Generic', _popular: true },
-          { id: 634, title: 'Tote Bag', brand: 'Generic', _popular: true },
-          { id: 520, title: 'Poster', brand: 'Generic', _popular: true },
-          { id: 1037, title: 'Sticker', brand: 'Generic', _popular: true }
+          { id: 5, title: 'Bella + Canvas 3001 T-Shirt', brand: 'Bella + Canvas', description: 'Premium unisex t-shirt', _popular: true },
+          { id: 77, title: 'Gildan 18500 Hoodie', brand: 'Gildan', description: 'Classic pullover hoodie', _popular: true },
+          { id: 265, title: 'Ceramic Mug 11oz', brand: 'Generic', description: 'Standard coffee mug', _popular: true },
+          { id: 634, title: 'Tote Bag', brand: 'Generic', description: 'Canvas tote bag', _popular: true },
+          { id: 520, title: 'Poster', brand: 'Generic', description: 'Wall poster', _popular: true },
+          { id: 1037, title: 'Sticker', brand: 'Generic', description: 'Die-cut vinyl stickers', _popular: true }
         ],
         total: 6,
         _fallback: true,

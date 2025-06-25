@@ -242,15 +242,29 @@ function createUserMcpServer(session: UserSession) {
         const requestedSizes = includeSizes.toUpperCase().split(',').map(s => s.trim());
         
         // Filter and price variants
-        const variants = variantsData.variants
+        const allVariants = variantsData.variants || [];
+        
+        // Log available variants for debugging
+        if (process.env.PRINTIFY_DEBUG === 'true') {
+          console.log('Available variants:', allVariants.map((v: any) => v.title));
+        }
+        
+        const variants = allVariants
           .filter((v: any) => {
-            const colorMatch = requestedColors.some(color => 
-              v.title.toLowerCase().includes(color)
-            );
-            const sizeMatch = requestedSizes.some(size => 
-              v.title.includes(size)
-            );
-            return colorMatch && sizeMatch;
+            // More flexible matching - check if title contains EITHER color OR size
+            const titleLower = v.title.toLowerCase();
+            const hasRequestedColor = requestedColors.some(color => titleLower.includes(color));
+            const hasRequestedSize = requestedSizes.some(size => v.title.includes(size));
+            
+            // Include variant if it has both, or if only one is specified
+            if (requestedColors.length > 0 && requestedSizes.length > 0) {
+              return hasRequestedColor && hasRequestedSize;
+            } else if (requestedColors.length > 0) {
+              return hasRequestedColor;
+            } else if (requestedSizes.length > 0) {
+              return hasRequestedSize;
+            }
+            return true; // Include all if no filters specified
           })
           .map((v: any) => {
             const pricing = session.printifyClient.calculatePricing(v.cost, profitMargin);
@@ -262,7 +276,14 @@ function createUserMcpServer(session: UserSession) {
           });
 
         if (variants.length === 0) {
-          throw new Error('No variants match the requested colors and sizes');
+          // Provide more helpful error message
+          const sampleVariants = allVariants.slice(0, 5).map((v: any) => v.title).join(', ');
+          throw new Error(
+            `No variants match the requested filters.\n` +
+            `Requested: colors=[${requestedColors.join(', ')}], sizes=[${requestedSizes.join(', ')}]\n` +
+            `Available variants include: ${sampleVariants}${allVariants.length > 5 ? ', ...' : ''}\n` +
+            `Try adjusting your color/size filters or use the regular create-product tool for more control.`
+          );
         }
 
         // Create product with simplified parameters
@@ -430,20 +451,37 @@ create-product-simple
       try {
         const blueprints = await session.printifyClient.searchBlueprints(category, type);
         
+        // Create compact response to save tokens
+        const compactBlueprints = {
+          total: blueprints.total || 0,
+          items: (blueprints.data || []).map((bp: any) => ({
+            id: bp.id,
+            title: bp.title,
+            desc: bp.description || bp.brand || ''
+          }))
+        };
+        
         // Add helpful message based on search
         let message = '';
         if (category && type) {
-          message = `Showing ${type} products in ${category} category:\n\n`;
+          message = `Found ${compactBlueprints.total} ${type} products in ${category}:\n`;
         } else if (category) {
-          message = `Showing all products in ${category} category:\n\n`;
+          message = `Found ${compactBlueprints.total} products in ${category}:\n`;
         } else if (type) {
-          message = `Showing all ${type} products:\n\n`;
+          message = `Found ${compactBlueprints.total} ${type} products:\n`;
+        } else {
+          message = `Found ${compactBlueprints.total} blueprints:\n`;
         }
+        
+        // Format compact list
+        const itemList = compactBlueprints.items
+          .map((item: any) => `• ${item.title} (ID: ${item.id})${item.desc ? ` - ${item.desc}` : ''}`)
+          .join('\n');
         
         return {
           content: [{
             type: "text",
-            text: message + JSON.stringify(blueprints, null, 2)
+            text: `${message}\n${itemList}\n\nUse get-blueprint with an ID for full details.`
           }]
         };
       } catch (error: any) {
@@ -465,10 +503,15 @@ create-product-simple
       try {
         const blueprints = await session.printifyClient.getPopularBlueprints();
         
+        // Create compact response
+        const popularList = (blueprints.data || [])
+          .map((bp: any) => `• ${bp.title} (ID: ${bp.id})${bp.description ? ` - ${bp.description}` : ''}`)
+          .join('\n');
+        
         return {
           content: [{
             type: "text",
-            text: `Popular blueprints for quick product creation:\n\n${JSON.stringify(blueprints, null, 2)}\n\nUse these blueprint IDs with create-product or create-product-simple for faster setup.`
+            text: `Popular blueprints for quick product creation:\n\n${popularList}\n\nUse these IDs with create-product or create-product-simple.`
           }]
         };
       } catch (error: any) {
