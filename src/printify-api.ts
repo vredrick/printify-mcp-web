@@ -122,6 +122,14 @@ export class PrintifyAPI {
       console.log(`[DEBUG] Making catalog request to: ${url}`);
       console.log('[DEBUG] Method:', options.method || 'GET');
       console.log('[DEBUG] Headers:', { ...headers, Authorization: 'Bearer ***' });
+      if (options.body) {
+        try {
+          const bodyData = JSON.parse(options.body);
+          console.log('[DEBUG] Request body:', JSON.stringify(bodyData, null, 2));
+        } catch {
+          console.log('[DEBUG] Request body (raw):', options.body);
+        }
+      }
     }
 
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -154,12 +162,32 @@ export class PrintifyAPI {
           let errorMessage = `Printify API error: ${response.status}`;
           
           // Parse error details if possible
+          let errorDetails = null;
           try {
             const errorJson = JSON.parse(errorText);
+            
+            // Handle various error response formats
             if (errorJson.error) {
               errorMessage = errorJson.error;
+              errorDetails = errorJson;
             } else if (errorJson.message) {
               errorMessage = errorJson.message;
+              errorDetails = errorJson;
+            } else if (errorJson.errors) {
+              // Handle validation errors with field-specific details
+              errorMessage = 'Validation failed';
+              const fieldErrors = Object.entries(errorJson.errors)
+                .map(([field, errors]: [string, any]) => {
+                  const errorList = Array.isArray(errors) ? errors : [errors];
+                  return `  ${field}: ${errorList.join(', ')}`;
+                })
+                .join('\n');
+              errorMessage += '\n\nField errors:\n' + fieldErrors;
+              errorDetails = errorJson;
+            } else {
+              // If we have any other structure, include it
+              errorMessage += '\n\nDetails: ' + JSON.stringify(errorJson, null, 2);
+              errorDetails = errorJson;
             }
           } catch {
             errorMessage += ` - ${errorText}`;
@@ -196,7 +224,7 @@ export class PrintifyAPI {
             continue;
           }
           
-          throw new PrintifyError(errorMessage, errorCode, response.status, { endpoint, errorText });
+          throw new PrintifyError(errorMessage, errorCode, response.status, { endpoint, errorText, errorDetails });
         }
 
         const result = await response.json() as any;
@@ -265,6 +293,14 @@ export class PrintifyAPI {
       console.log(`[DEBUG] Making request to: ${url}`);
       console.log('[DEBUG] Method:', options.method || 'GET');
       console.log('[DEBUG] Headers:', { ...headers, Authorization: 'Bearer ***' });
+      if (options.body) {
+        try {
+          const bodyData = JSON.parse(options.body);
+          console.log('[DEBUG] Request body:', JSON.stringify(bodyData, null, 2));
+        } catch {
+          console.log('[DEBUG] Request body (raw):', options.body);
+        }
+      }
     }
 
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -285,12 +321,32 @@ export class PrintifyAPI {
           let errorMessage = `Printify API error: ${response.status}`;
           
           // Parse error details if possible
+          let errorDetails = null;
           try {
             const errorJson = JSON.parse(errorText);
+            
+            // Handle various error response formats
             if (errorJson.error) {
               errorMessage = errorJson.error;
+              errorDetails = errorJson;
             } else if (errorJson.message) {
               errorMessage = errorJson.message;
+              errorDetails = errorJson;
+            } else if (errorJson.errors) {
+              // Handle validation errors with field-specific details
+              errorMessage = 'Validation failed';
+              const fieldErrors = Object.entries(errorJson.errors)
+                .map(([field, errors]: [string, any]) => {
+                  const errorList = Array.isArray(errors) ? errors : [errors];
+                  return `  ${field}: ${errorList.join(', ')}`;
+                })
+                .join('\n');
+              errorMessage += '\n\nField errors:\n' + fieldErrors;
+              errorDetails = errorJson;
+            } else {
+              // If we have any other structure, include it
+              errorMessage += '\n\nDetails: ' + JSON.stringify(errorJson, null, 2);
+              errorDetails = errorJson;
             }
           } catch {
             errorMessage += ` - ${errorText}`;
@@ -327,7 +383,7 @@ export class PrintifyAPI {
             continue;
           }
           
-          throw new PrintifyError(errorMessage, errorCode, response.status, { endpoint, errorText });
+          throw new PrintifyError(errorMessage, errorCode, response.status, { endpoint, errorText, errorDetails });
         }
 
         const result = await response.json();
@@ -461,10 +517,10 @@ export class PrintifyAPI {
             position: area.position,
             images: [{
               id: area.imageId,
-              x: area.x || 0,
-              y: area.y || 0,
-              scale: area.scale || 1,
-              angle: area.angle || 0
+              x: area.x !== undefined ? area.x : 0.5,
+              y: area.y !== undefined ? area.y : 0.5,
+              scale: area.scale !== undefined ? area.scale : 1.0,
+              angle: area.angle !== undefined ? area.angle : 0
             }]
           }]
         })) : []

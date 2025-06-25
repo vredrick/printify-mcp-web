@@ -189,8 +189,8 @@ function createUserMcpServer(session: UserSession) {
       printAreas: z.record(z.string(), z.object({
         position: z.string().describe("Print position (e.g., 'front', 'back')"),
         imageId: z.string().describe("Image ID from upload-image"),
-        x: z.number().optional().default(0).describe("Horizontal position (0-1, default: 0 for center)"),
-        y: z.number().optional().default(0).describe("Vertical position (0-1, default: 0 for center)"),
+        x: z.number().optional().default(0.5).describe("Horizontal position (0-1, default: 0.5 for center)"),
+        y: z.number().optional().default(0.5).describe("Vertical position (0-1, default: 0.5 for center)"),
         scale: z.number().optional().default(1).describe("Scale factor (0.5-2, default: 1)"),
         angle: z.number().optional().default(0).describe("Rotation angle in degrees (default: 0)")
       })).optional().describe("Design placement on product with positioning")
@@ -249,22 +249,56 @@ function createUserMcpServer(session: UserSession) {
           console.log('Available variants:', allVariants.map((v: any) => v.title));
         }
         
+        // Create fuzzy matching function
+        const fuzzyColorMatch = (variantTitle: string, requestedColor: string) => {
+          const titleLower = variantTitle.toLowerCase();
+          const colorLower = requestedColor.toLowerCase();
+          
+          // Direct match
+          if (titleLower.includes(colorLower)) return true;
+          
+          // Common variations
+          const colorVariations: { [key: string]: string[] } = {
+            'white': ['white', 'solid white', 'wht'],
+            'black': ['black', 'solid black', 'blk'],
+            'gray': ['gray', 'grey', 'heather gray', 'heather grey'],
+            'red': ['red', 'solid red'],
+            'blue': ['blue', 'solid blue', 'navy', 'royal blue'],
+            'green': ['green', 'solid green', 'forest', 'olive'],
+            'yellow': ['yellow', 'gold'],
+            'pink': ['pink', 'rose'],
+            'purple': ['purple', 'violet'],
+            'orange': ['orange'],
+            'brown': ['brown', 'chocolate']
+          };
+          
+          // Check if requested color matches any variation
+          for (const [baseColor, variations] of Object.entries(colorVariations)) {
+            if (variations.includes(colorLower)) {
+              return variations.some(v => titleLower.includes(v));
+            }
+          }
+          
+          return false;
+        };
+        
         const variants = allVariants
           .filter((v: any) => {
-            // More flexible matching - check if title contains EITHER color OR size
-            const titleLower = v.title.toLowerCase();
-            const hasRequestedColor = requestedColors.some(color => titleLower.includes(color));
-            const hasRequestedSize = requestedSizes.some(size => v.title.includes(size));
+            const title = v.title;
             
-            // Include variant if it has both, or if only one is specified
-            if (requestedColors.length > 0 && requestedSizes.length > 0) {
-              return hasRequestedColor && hasRequestedSize;
-            } else if (requestedColors.length > 0) {
-              return hasRequestedColor;
-            } else if (requestedSizes.length > 0) {
-              return hasRequestedSize;
-            }
-            return true; // Include all if no filters specified
+            // Check color match with fuzzy logic
+            const hasRequestedColor = requestedColors.length === 0 || 
+              requestedColors.some(color => fuzzyColorMatch(title, color));
+            
+            // Check size match (exact for sizes)
+            const hasRequestedSize = requestedSizes.length === 0 ||
+              requestedSizes.some(size => {
+                // Match size at word boundaries to avoid matching XL in 2XL
+                const sizeRegex = new RegExp(`\\b${size}\\b`);
+                return sizeRegex.test(title);
+              });
+            
+            return hasRequestedColor && hasRequestedSize;
           })
           .map((v: any) => {
             const pricing = session.printifyClient.calculatePricing(v.cost, profitMargin);
@@ -297,8 +331,8 @@ function createUserMcpServer(session: UserSession) {
             front: {
               position: 'front',
               imageId,
-              x: 0,
-              y: 0,
+              x: 0.5,
+              y: 0.5,
               scale: 1,
               angle: 0
             }
@@ -547,6 +581,179 @@ Profit per sale: $${(pricing.profit / 100).toFixed(2)}
 Use ${pricing.price} as the price when creating variants.`
         }]
       };
+    }
+  );
+
+  // Get variant colors tool
+  server.tool(
+    "get-variant-colors",
+    {
+      blueprintId: z.string().describe("Blueprint ID"),
+      printProviderId: z.string().describe("Print provider ID")
+    },
+    async ({ blueprintId, printProviderId }) => {
+      try {
+        const variants = await session.printifyClient.getVariants(blueprintId, printProviderId);
+        
+        // Extract unique colors from variant titles
+        const colorSet = new Set<string>();
+        const colorPatterns: string[] = [];
+        
+        variants.variants.forEach((v: any) => {
+          // Extract color from title (usually before size or after /)
+          const title = v.title;
+          
+          // Common patterns: "White / S", "Solid White / S", "White", etc.
+          const match = title.match(/^([^\/]+?)(?:\s*\/|$)/);
+          if (match) {
+            const color = match[1].trim();
+            colorSet.add(color);
+          }
+        });
+        
+        const colors = Array.from(colorSet).sort();
+        
+        return {
+          content: [{
+            type: "text",
+            text: `Available colors for blueprint ${blueprintId}:
+${colors.map(c => `• ${c}`).join('\n')}
+
+Total: ${colors.length} colors
+
+Use these exact color names when creating products or filtering variants.`
+          }]
+        };
+      } catch (error: any) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error getting variant colors: ${error.message}`
+          }]
+        };
+      }
+    }
+  );
+
+  // Get variant sizes tool
+  server.tool(
+    "get-variant-sizes",
+    {
+      blueprintId: z.string().describe("Blueprint ID"),
+      printProviderId: z.string().describe("Print provider ID"),
+      color: z.string().optional().describe("Filter sizes for specific color")
+    },
+    async ({ blueprintId, printProviderId, color }) => {
+      try {
+        const variants = await session.printifyClient.getVariants(blueprintId, printProviderId);
+        
+        // Extract sizes
+        const sizeSet = new Set<string>();
+        
+        variants.variants.forEach((v: any) => {
+          const title = v.title;
+          
+          // If color filter is provided, only process matching variants
+          if (color && !title.toLowerCase().includes(color.toLowerCase())) {
+            return;
+          }
+          
+          // Extract size (usually after / or at the end)
+          const sizeMatch = title.match(/\/\s*([^\/]+?)$/);
+          if (sizeMatch) {
+            sizeSet.add(sizeMatch[1].trim());
+          } else {
+            // Sometimes size is the whole title for simple products
+            const parts = title.split(' ');
+            const lastPart = parts[parts.length - 1];
+            if (['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'].includes(lastPart)) {
+              sizeSet.add(lastPart);
+            }
+          }
+        });
+        
+        const sizes = Array.from(sizeSet).sort((a, b) => {
+          const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'];
+          return sizeOrder.indexOf(a) - sizeOrder.indexOf(b);
+        });
+        
+        return {
+          content: [{
+            type: "text",
+            text: `Available sizes for blueprint ${blueprintId}${color ? ` (color: ${color})` : ''}:
+${sizes.map(s => `• ${s}`).join('\n')}
+
+Total: ${sizes.length} sizes
+
+Use these exact size names when creating products or filtering variants.`
+          }]
+        };
+      } catch (error: any) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error getting variant sizes: ${error.message}`
+          }]
+        };
+      }
+    }
+  );
+
+  // Validate product data tool
+  server.tool(
+    "validate-product-data",
+    {
+      blueprintId: z.number().describe("Blueprint ID"),
+      printProviderId: z.number().describe("Print provider ID"),
+      variantIds: z.array(z.number()).describe("Array of variant IDs to validate"),
+      imageId: z.string().describe("Image ID to validate")
+    },
+    async ({ blueprintId, printProviderId, variantIds, imageId }) => {
+      try {
+        const issues: string[] = [];
+        const suggestions: string[] = [];
+        
+        // Check if variants exist
+        const variantsData = await session.printifyClient.getVariants(
+          blueprintId.toString(),
+          printProviderId.toString()
+        );
+        
+        const availableVariantIds = variantsData.variants.map((v: any) => v.id);
+        const invalidVariants = variantIds.filter(id => !availableVariantIds.includes(id));
+        
+        if (invalidVariants.length > 0) {
+          issues.push(`Invalid variant IDs: ${invalidVariants.join(', ')}`);
+          suggestions.push(`Available variant IDs: ${availableVariantIds.slice(0, 5).join(', ')}...`);
+        }
+        
+        // Show sample variant for reference
+        if (variantsData.variants.length > 0) {
+          const sample = variantsData.variants[0];
+          suggestions.push(`Sample variant: ID ${sample.id} = "${sample.title}" (cost: $${(sample.cost / 100).toFixed(2)})`);
+        }
+        
+        const isValid = issues.length === 0;
+        
+        return {
+          content: [{
+            type: "text",
+            text: `Validation result: ${isValid ? '✅ VALID' : '❌ INVALID'}
+
+${issues.length > 0 ? 'Issues found:\n' + issues.map(i => `• ${i}`).join('\n') + '\n\n' : ''}
+${suggestions.length > 0 ? 'Suggestions:\n' + suggestions.map(s => `• ${s}`).join('\n') : ''}
+
+${isValid ? 'This product data should work with create-product.' : 'Fix the issues above before creating the product.'}`
+          }]
+        };
+      } catch (error: any) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error validating product data: ${error.message}`
+          }]
+        };
+      }
     }
   );
 
