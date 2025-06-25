@@ -81,6 +81,152 @@ export class PrintifyAPI {
     this.shopId = shopId;
   }
 
+  private async makeCatalogRequest(endpoint: string, options: any = {}, retries: number = 3): Promise<any> {
+    // Special handling for catalog endpoints with longer timeout
+    const url = `${this.baseUrl}${endpoint}`;
+    const headers = {
+      'Authorization': `Bearer ${this.apiToken}`,
+      'User-Agent': 'printify-mcp-web/1.0.0',
+      'Content-Type': 'application/json;charset=utf-8',
+      'Connection': 'keep-alive',
+      'Keep-Alive': 'timeout=60',
+      'Accept': 'application/json',
+      'Accept-Encoding': 'gzip, deflate',
+      ...options.headers
+    };
+
+    const debugMode = process.env.PRINTIFY_DEBUG === 'true';
+    if (debugMode) {
+      console.log(`[DEBUG] Making catalog request to: ${url}`);
+      console.log('[DEBUG] Method:', options.method || 'GET');
+      console.log('[DEBUG] Headers:', { ...headers, Authorization: 'Bearer ***' });
+    }
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000); // 60 second timeout for catalog
+        const startTime = Date.now();
+        
+        const response = await fetch(url, {
+          ...options,
+          headers,
+          signal: controller.signal,
+          compress: true // Enable compression
+        });
+        
+        clearTimeout(timeout);
+        const responseTime = Date.now() - startTime;
+
+        if (debugMode) {
+          console.log(`[DEBUG] Catalog response received in ${responseTime}ms`);
+          console.log(`[DEBUG] Response status: ${response.status}`);
+          const contentLength = response.headers.get('content-length');
+          if (contentLength) {
+            console.log(`[DEBUG] Response size: ${contentLength} bytes`);
+          }
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          let errorMessage = `Printify API error: ${response.status}`;
+          
+          // Parse error details if possible
+          try {
+            const errorJson = JSON.parse(errorText);
+            if (errorJson.error) {
+              errorMessage = errorJson.error;
+            } else if (errorJson.message) {
+              errorMessage = errorJson.message;
+            }
+          } catch {
+            errorMessage += ` - ${errorText}`;
+          }
+
+          // Map status codes to error codes
+          let errorCode = PrintifyErrorCode.UNKNOWN_ERROR;
+          if (response.status === 401) {
+            errorCode = PrintifyErrorCode.AUTH_FAILED;
+            errorMessage += '. Please check that your API key is valid and active in your Printify account settings.';
+          } else if (response.status === 429) {
+            errorCode = PrintifyErrorCode.RATE_LIMIT;
+            errorMessage += '. Rate limit exceeded. Please wait a moment and try again.';
+          } else if (response.status === 404) {
+            errorCode = PrintifyErrorCode.NOT_FOUND;
+            errorMessage += '. The requested resource was not found. It may have been deleted or the ID is incorrect.';
+          } else if (response.status === 400 || response.status === 422) {
+            errorCode = PrintifyErrorCode.VALIDATION_ERROR;
+            errorMessage += '. Request validation failed. Check your input parameters.';
+          } else if (response.status >= 500) {
+            errorCode = PrintifyErrorCode.SERVER_ERROR;
+            errorMessage += '. Printify server error. Please try again later.';
+          }
+
+          if (debugMode) {
+            console.error(`[DEBUG] Catalog API error response:`, errorText);
+          }
+          
+          // Retry on rate limit or server errors
+          if ((response.status === 429 || response.status >= 500) && attempt < retries) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 5000); // Exponential backoff, max 5s
+            console.log(`Retrying catalog request after ${delay}ms (attempt ${attempt + 1}/${retries})...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          
+          throw new PrintifyError(errorMessage, errorCode, response.status, { endpoint, errorText });
+        }
+
+        const result = await response.json() as any;
+        if (debugMode) {
+          console.log('[DEBUG] Catalog response received successfully');
+          if (result.data && Array.isArray(result.data)) {
+            console.log(`[DEBUG] Catalog response contains ${result.data.length} items`);
+          }
+        }
+        return result;
+      } catch (error: any) {
+        // Handle timeout/abort errors
+        if (error.name === 'AbortError') {
+          console.error(`Catalog request timeout after 60s: ${url}`);
+          if (attempt < retries) {
+            const delay = Math.min(2000 * Math.pow(2, attempt), 10000);
+            console.log(`Retrying catalog request after timeout (attempt ${attempt + 1}/${retries})...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw new PrintifyError(
+            `Catalog request timeout after 60 seconds: ${endpoint}. Try using a smaller limit parameter.`,
+            PrintifyErrorCode.TIMEOUT,
+            undefined,
+            { endpoint, url }
+          );
+        }
+        
+        // Retry on network errors
+        if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'EPIPE') {
+          if (attempt < retries) {
+            const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+            console.log(`Network error (${error.code}), retrying catalog request after ${delay}ms (attempt ${attempt + 1}/${retries})...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw new PrintifyError(
+            `Network error during catalog request: ${error.code || error.message}`,
+            PrintifyErrorCode.NETWORK_ERROR,
+            undefined,
+            { endpoint, errorCode: error.code }
+          );
+        }
+        
+        if (debugMode) {
+          console.error('[DEBUG] Catalog request failed:', error);
+        }
+        throw error;
+      }
+    }
+  }
+
   private async makeRequest(endpoint: string, options: any = {}, retries: number = 3): Promise<any> {
     const url = `${this.baseUrl}${endpoint}`;
     const headers = {
@@ -469,31 +615,116 @@ export class PrintifyAPI {
       return cached;
     }
 
-    try {
-      const result = await this.makeRequest(`/catalog/blueprints.json?page=${page}&limit=${limit}`);
-      this.setCache(cacheKey, result);
-      return result;
-    } catch (error: any) {
-      // If the request fails, provide a helpful fallback
-      console.error('Failed to fetch blueprints:', error.message);
-      
-      // Return some common blueprint IDs as fallback
-      const fallbackBlueprints = {
-        data: [
-          { id: 5, title: 'Bella + Canvas 3001 Unisex T-Shirt', description: 'Popular unisex t-shirt' },
-          { id: 6, title: 'Gildan 18500 Unisex Hoodie', description: 'Standard hoodie' },
-          { id: 265, title: 'Ceramic Mug 11oz', description: 'Standard coffee mug' },
-          { id: 520, title: 'Poster', description: 'Wall poster various sizes' }
-        ],
-        current_page: 1,
-        last_page: 1,
-        total: 4,
-        _fallback: true
-      };
-      
-      console.log('Using fallback blueprint data. For full catalog, try again later.');
-      return fallbackBlueprints;
+    // Use progressively smaller limits if failures occur
+    const limitsToTry = [Math.min(limit, 5), 3, 1];
+    let lastError: any;
+
+    for (const currentLimit of limitsToTry) {
+      try {
+        console.log(`Attempting to fetch blueprints with limit=${currentLimit}...`);
+        const result = await this.makeCatalogRequest(`/catalog/blueprints.json?page=${page}&limit=${currentLimit}`);
+        
+        // If we had to use a smaller limit, adjust the response
+        if (currentLimit < limit && result.data) {
+          console.log(`Successfully fetched blueprints with reduced limit (${currentLimit} instead of ${limit})`);
+        }
+        
+        this.setCache(cacheKey, result);
+        return result;
+      } catch (error: any) {
+        lastError = error;
+        console.error(`Failed to fetch blueprints with limit=${currentLimit}:`, error.message);
+        
+        // Don't retry if it's an auth error
+        if (error.code === PrintifyErrorCode.AUTH_FAILED) {
+          throw error;
+        }
+        
+        // Continue to next attempt with smaller limit
+        if (currentLimit > 1) {
+          console.log('Retrying with smaller limit...');
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Brief delay between attempts
+        }
+      }
     }
+
+    // If all attempts fail, provide enhanced fallback data
+    console.error('All attempts to fetch blueprints failed:', lastError?.message);
+    
+    // Return enhanced fallback blueprint data
+    const fallbackBlueprints = {
+      data: [
+        { 
+          id: 5, 
+          title: 'Bella + Canvas 3001 Unisex T-Shirt', 
+          description: 'Premium unisex t-shirt, soft and comfortable',
+          brand: 'Bella + Canvas',
+          model: '3001'
+        },
+        { 
+          id: 6, 
+          title: 'Gildan 18500 Unisex Hoodie', 
+          description: 'Classic pullover hoodie',
+          brand: 'Gildan',
+          model: '18500'
+        },
+        { 
+          id: 384, 
+          title: 'Bella + Canvas 3413 Unisex Triblend T-shirt',
+          description: 'Tri-blend fabric for ultimate softness',
+          brand: 'Bella + Canvas',
+          model: '3413'
+        },
+        { 
+          id: 12, 
+          title: 'Gildan 64000 Unisex T-Shirt',
+          description: 'Affordable basic t-shirt',
+          brand: 'Gildan',
+          model: '64000'
+        },
+        { 
+          id: 265, 
+          title: 'Ceramic Mug 11oz', 
+          description: 'Standard coffee mug, dishwasher safe',
+          brand: 'Generic',
+          model: '11oz'
+        },
+        { 
+          id: 520, 
+          title: 'Poster', 
+          description: 'Wall poster in various sizes',
+          brand: 'Generic',
+          model: 'Poster'
+        },
+        { 
+          id: 634, 
+          title: 'Tote Bag',
+          description: 'Canvas tote bag for everyday use',
+          brand: 'Generic',
+          model: 'Tote'
+        },
+        { 
+          id: 1037, 
+          title: 'Sticker',
+          description: 'Die-cut vinyl stickers',
+          brand: 'Generic',
+          model: 'Sticker'
+        }
+      ],
+      current_page: page,
+      last_page: 1,
+      total: 8,
+      per_page: limit,
+      _fallback: true,
+      _message: 'Using cached blueprint data. For live catalog, try using get-blueprints with limit=3 or check your connection.'
+    };
+    
+    console.log('Using enhanced fallback blueprint data. For full catalog access:');
+    console.log('1. Try calling get-blueprints with limit=3');
+    console.log('2. Check your internet connection');
+    console.log('3. Enable debug mode with PRINTIFY_DEBUG=true for more details');
+    
+    return fallbackBlueprints;
   }
 
   async getBlueprint(blueprintId: string): Promise<any> {

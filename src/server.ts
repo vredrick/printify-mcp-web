@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { PrintifyAPI } from './printify-api.js';
+import { PrintifyAPI, PrintifyErrorCode } from './printify-api.js';
 import { ReplicateClient } from './replicate-client.js';
 import { z } from 'zod';
 import crypto from 'crypto';
@@ -321,17 +321,41 @@ function createUserMcpServer(session: UserSession) {
   server.tool(
     "get-blueprints",
     {
-      page: z.number().optional().default(1).describe("Page number"),
-      limit: z.number().optional().default(10).describe("Number of blueprints per page")
+      page: z.number().optional().default(1).describe("Page number (default: 1)"),
+      limit: z.number().optional().default(5).describe("Number of blueprints per page (default: 5, max: 10, use 3 for better reliability)")
     },
     async ({ page, limit }) => {
-      const blueprints = await session.printifyClient.getBlueprints(page, limit);
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(blueprints, null, 2)
-        }]
-      };
+      try {
+        const blueprints = await session.printifyClient.getBlueprints(page, limit);
+        
+        // Add helpful message if using fallback data
+        if (blueprints._fallback) {
+          return {
+            content: [{
+              type: "text",
+              text: `${blueprints._message}\n\n${JSON.stringify(blueprints, null, 2)}`
+            }]
+          };
+        }
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(blueprints, null, 2)
+          }]
+        };
+      } catch (error: any) {
+        // Provide helpful error message
+        if (error.code === PrintifyErrorCode.TIMEOUT) {
+          return {
+            content: [{
+              type: "text",
+              text: `Error: Request timed out. The blueprints catalog is large and may take time to load.\n\nTry:\n1. Using a smaller limit (e.g., limit=3)\n2. Checking your internet connection\n3. Enabling debug mode with PRINTIFY_DEBUG=true\n\nError details: ${error.message}`
+            }]
+          };
+        }
+        throw error;
+      }
     }
   );
 
