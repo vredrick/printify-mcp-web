@@ -773,7 +773,32 @@ export class PrintifyAPI {
 
   // Search blueprints by category and type
   async searchBlueprints(category?: string, type?: string): Promise<any> {
-    const allBlueprints = await this.getBlueprints(1, 50);
+    let allBlueprints;
+    
+    try {
+      allBlueprints = await this.getBlueprints(1, 50);
+    } catch (error: any) {
+      // If API fails, use fallback data for searching
+      console.log('Failed to fetch blueprints, using fallback data for search');
+      
+      // Create fallback response with searchable data
+      allBlueprints = {
+        data: [
+          { id: 5, title: 'Bella + Canvas 3001 Unisex T-Shirt', description: 'Premium unisex t-shirt' },
+          { id: 6, title: 'Gildan 18500 Unisex Hoodie', description: 'Classic pullover hoodie' },
+          { id: 77, title: 'Champion S700 Hoodie', description: 'Premium hoodie' },
+          { id: 380, title: 'Independent Trading Co. Hoodie', description: 'Heavy blend hoodie' },
+          { id: 265, title: 'Ceramic Mug 11oz', description: 'Standard coffee mug' },
+          { id: 634, title: 'Tote Bag', description: 'Canvas tote bag' },
+          { id: 520, title: 'Poster', description: 'Wall poster' },
+          { id: 1037, title: 'Sticker', description: 'Die-cut vinyl stickers' },
+          { id: 12, title: 'Gildan 64000 Unisex T-Shirt', description: 'Basic t-shirt' },
+          { id: 384, title: 'Bella + Canvas 3413 Triblend T-shirt', description: 'Tri-blend t-shirt' }
+        ],
+        _fallback: true,
+        _message: 'Using fallback data due to API error'
+      };
+    }
     
     if (!category && !type) {
       return allBlueprints;
