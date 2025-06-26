@@ -818,13 +818,27 @@ export class PrintifyAPI {
         })) : []
     };
 
-    return this.makeRequest(`/shops/${this.shopId}/products.json`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(formattedData)
-    });
+    // Debug log the request data
+    if (process.env.PRINTIFY_DEBUG === 'true') {
+      console.log('[DEBUG] Creating product with data:', JSON.stringify(formattedData, null, 2));
+    }
+    
+    try {
+      return await this.makeRequest(`/shops/${this.shopId}/products.json`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(formattedData)
+      });
+    } catch (error: any) {
+      // Enhanced error logging for debugging
+      if (process.env.PRINTIFY_DEBUG === 'true') {
+        console.log('[DEBUG] Product creation failed. Request data:', JSON.stringify(formattedData, null, 2));
+        console.log('[DEBUG] Error details:', error);
+      }
+      throw error;
+    }
   }
 
   async updateProduct(productId: string, productData: any): Promise<PrintifyProduct> {

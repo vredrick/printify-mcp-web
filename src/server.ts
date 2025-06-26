@@ -248,44 +248,111 @@ function createUserMcpServer(session: UserSession) {
     },
     async ({ title, description, blueprintId, imageId, profitMargin, includeColors, includeSizes }) => {
       try {
-        // STEP 1: Pre-validation
+        // STEP 1: Enhanced pre-validation
         const validationErrors: string[] = [];
+        const warnings: string[] = [];
         
+        // Title validation
         if (!title || title.trim().length < 3) {
           validationErrors.push("Title must be at least 3 characters long");
+        } else if (title.trim().length > 100) {
+          warnings.push("Title is very long (>100 chars) - consider shortening for better display");
         }
         
+        // Image ID validation
         if (!imageId || imageId.trim().length === 0) {
           validationErrors.push("Image ID is required - use upload-image first");
+        } else if (!imageId.match(/^[a-zA-Z0-9]{24}$/)) {
+          warnings.push(`Image ID format looks unusual: ${imageId} - ensure it's from upload-image`);
+        }
+        
+        // Blueprint ID validation
+        if (!blueprintId || blueprintId <= 0) {
+          validationErrors.push("Invalid blueprint ID - must be a positive number");
+        }
+        
+        // Color/size validation
+        const colorList = includeColors.toLowerCase().split(',').map(c => c.trim()).filter(c => c.length > 0);
+        const sizeList = includeSizes.toUpperCase().split(',').map(s => s.trim()).filter(s => s.length > 0);
+        
+        if (colorList.length === 0) {
+          warnings.push("No colors specified - will try to match any color");
+        } else if (colorList.length > 10) {
+          warnings.push("Many colors requested - this may limit available variants");
+        }
+        
+        if (sizeList.length === 0) {
+          warnings.push("No sizes specified - will try to match any size");
+        }
+        
+        // Profit margin validation
+        const marginMatch = profitMargin.match(/^(\d+(?:\.\d+)?)\s*%?$/);
+        if (!marginMatch) {
+          validationErrors.push("Invalid profit margin format - use '50%' or '0.5'");
+        } else {
+          const marginValue = parseFloat(marginMatch[1]);
+          if (marginValue < 10) {
+            warnings.push("Low profit margin (<10%) - consider increasing for sustainability");
+          } else if (marginValue > 200) {
+            warnings.push("Very high profit margin (>200%) - may affect competitiveness");
+          }
         }
         
         if (validationErrors.length > 0) {
-          throw new Error(`Validation failed:\n• ${validationErrors.join('\n• ')}`);
+          throw new Error(
+            `❌ Validation failed\n\n` +
+            `🚫 Errors:\n${validationErrors.map(e => `• ${e}`).join('\n')}\n\n` +
+            `💡 Quick fixes:\n` +
+            `• Use get-popular-blueprints for valid blueprint IDs\n` +
+            `• Upload an image first with upload-image\n` +
+            `• Example: title='My Product' blueprintId=77 imageId='...' colors='white,black'`
+          );
         }
+        
+        // Log warnings but don't fail
+        if (warnings.length > 0 && process.env.PRINTIFY_DEBUG === 'true') {
+          console.log(`[DEBUG] Warnings: ${warnings.join('; ')}`);
+        }
+        
+        // Debug logging function
+        const debugLog = (message: string) => {
+          if (process.env.PRINTIFY_DEBUG === 'true') {
+            console.log(`[DEBUG] create-product-simple: ${message}`);
+          }
+        };
+        
+        debugLog(`Starting product creation - Title: "${title}", Blueprint: ${blueprintId}, Image: ${imageId}`);
         
         // STEP 2: Validate blueprint with error recovery
         let blueprint;
         try {
+          debugLog(`Validating blueprint ${blueprintId}...`);
           blueprint = await session.printifyClient.getBlueprint(blueprintId.toString());
           if (!blueprint) {
             throw new Error(`Blueprint ${blueprintId} not found`);
           }
+          debugLog(`Blueprint validated: ${blueprint.title || 'Unknown'}`);
         } catch (error: any) {
+          debugLog(`Blueprint validation failed: ${error.message}`);
           throw new Error(`Blueprint validation failed: ${error.message}\n• Use get-popular-blueprints to find valid blueprint IDs`);
         }
         
         // STEP 3: Get print providers with fallback
         let providers;
         try {
+          debugLog(`Getting print providers for blueprint ${blueprintId}...`);
           providers = await session.printifyClient.getPrintProviders(blueprintId.toString());
           if (!providers || providers.length === 0) {
             throw new Error(`No print providers available for blueprint ${blueprintId} (${blueprint.title})`);
           }
+          debugLog(`Found ${providers.length} print providers`);
         } catch (error: any) {
+          debugLog(`Print provider lookup failed: ${error.message}`);
           throw new Error(`Print provider lookup failed: ${error.message}\n• This blueprint may not be available in your region`);
         }
         
         const printProviderId = providers[0].id;
+        debugLog(`Selected print provider: ${providers[0].title || 'Unknown'} (ID: ${printProviderId})`)
         
         // STEP 4: Get and validate variants
         let variantsData;
@@ -301,48 +368,104 @@ function createUserMcpServer(session: UserSession) {
           throw new Error(`Variant lookup failed: ${error.message}\n• Try a different blueprint or check provider availability`);
         }
         
-        // STEP 5: Simple, reliable variant filtering
+        // STEP 5: Enhanced variant filtering with improved matching
         const requestedColors = includeColors.toLowerCase().split(',').map(c => c.trim()).filter(c => c.length > 0);
         const requestedSizes = includeSizes.toUpperCase().split(',').map(s => s.trim()).filter(s => s.length > 0);
         
         const allVariants = variantsData.variants || [];
         
-        // Simple exact matching - more reliable than fuzzy matching
-        const simpleColorMatch = (variantTitle: string, requestedColor: string) => {
+        debugLog(`Total variants available: ${allVariants.length}`);
+        debugLog(`Requested colors: ${requestedColors.join(', ')}`);
+        debugLog(`Requested sizes: ${requestedSizes.join(', ')}`);
+        
+        // Enhanced color matching with fuzzy logic
+        const enhancedColorMatch = (variantTitle: string, requestedColor: string) => {
           const titleLower = variantTitle.toLowerCase();
           const colorLower = requestedColor.toLowerCase();
-          return titleLower.includes(colorLower);
+          
+          // Direct match
+          if (titleLower.includes(colorLower)) return true;
+          
+          // Handle common variations
+          const colorVariations: {[key: string]: string[]} = {
+            'white': ['white', 'solid white', 'natural', 'cream'],
+            'black': ['black', 'solid black', 'dark'],
+            'gray': ['gray', 'grey', 'heather gray', 'heather grey', 'charcoal'],
+            'red': ['red', 'cardinal', 'scarlet', 'crimson'],
+            'blue': ['blue', 'navy', 'royal blue', 'sapphire'],
+            'green': ['green', 'forest', 'olive', 'emerald']
+          };
+          
+          // Check if requested color has variations
+          const variations = colorVariations[colorLower] || [];
+          return variations.some(variant => titleLower.includes(variant));
         };
         
-        const simpleSizeMatch = (variantTitle: string, requestedSize: string) => {
-          // Match size with word boundaries to avoid XL matching 2XL
-          const sizeRegex = new RegExp(`\\b${requestedSize}\\b`, 'i');
-          return sizeRegex.test(variantTitle);
+        // Enhanced size matching with better boundaries
+        const enhancedSizeMatch = (variantTitle: string, requestedSize: string) => {
+          // Extract size from variant title more reliably
+          // Common patterns: "Color / Size", "Color - Size", "Color Size"
+          const sizePatterns = [
+            new RegExp(`[/\\-\\s]\\s*${requestedSize}\\s*$`, 'i'), // End of string
+            new RegExp(`[/\\-\\s]\\s*${requestedSize}\\s*[/\\-\\s]`, 'i'), // Middle
+            new RegExp(`^${requestedSize}\\s*[/\\-\\s]`, 'i'), // Start
+            new RegExp(`\\b${requestedSize}\\b`, 'i') // Word boundary
+          ];
+          
+          return sizePatterns.some(pattern => pattern.test(variantTitle));
         };
         
-        // Filter variants with progressive fallback
+        // Filter variants with enhanced matching
         let filteredVariants = allVariants.filter((v: any) => {
           const title = v.title;
           
           const hasRequestedColor = requestedColors.length === 0 || 
-            requestedColors.some(color => simpleColorMatch(title, color));
+            requestedColors.some(color => enhancedColorMatch(title, color));
           
           const hasRequestedSize = requestedSizes.length === 0 ||
-            requestedSizes.some(size => simpleSizeMatch(title, size));
+            requestedSizes.some(size => enhancedSizeMatch(title, size));
+          
+          if (hasRequestedColor && hasRequestedSize) {
+            debugLog(`Matched variant: ${title}`);
+          }
           
           return hasRequestedColor && hasRequestedSize;
         });
         
-        // Fallback 1: If no exact matches, try colors only
-        if (filteredVariants.length === 0 && requestedColors.length > 0) {
-          filteredVariants = allVariants.filter((v: any) => 
-            requestedColors.some(color => simpleColorMatch(v.title, color))
-          );
-        }
+        debugLog(`Initial filter matched ${filteredVariants.length} variants`);
         
-        // Fallback 2: If still no matches, use first few variants
+        // Progressive fallback strategy
         if (filteredVariants.length === 0) {
-          filteredVariants = allVariants.slice(0, Math.min(3, allVariants.length));
+          debugLog('No exact matches found, trying fallback strategies...');
+          
+          // Fallback 1: Try colors only (ignore sizes)
+          if (requestedColors.length > 0) {
+            filteredVariants = allVariants.filter((v: any) => 
+              requestedColors.some(color => enhancedColorMatch(v.title, color))
+            );
+            debugLog(`Color-only fallback matched ${filteredVariants.length} variants`);
+          }
+          
+          // Fallback 2: Try common color/size combinations
+          if (filteredVariants.length === 0) {
+            const commonColors = ['white', 'black', 'gray', 'navy'];
+            const commonSizes = ['M', 'L', 'XL'];
+            
+            filteredVariants = allVariants.filter((v: any) => {
+              const title = v.title.toLowerCase();
+              const hasCommonColor = commonColors.some(color => title.includes(color));
+              const hasCommonSize = commonSizes.some(size => enhancedSizeMatch(v.title, size));
+              return hasCommonColor && hasCommonSize;
+            });
+            debugLog(`Common combo fallback matched ${filteredVariants.length} variants`);
+          }
+          
+          // Fallback 3: Use most popular variants (first few)
+          if (filteredVariants.length === 0) {
+            const fallbackCount = Math.min(5, allVariants.length);
+            filteredVariants = allVariants.slice(0, fallbackCount);
+            debugLog(`Using first ${fallbackCount} variants as final fallback`);
+          }
         }
         
         const variants = filteredVariants.map((v: any) => {
@@ -355,12 +478,38 @@ function createUserMcpServer(session: UserSession) {
         });
 
         if (variants.length === 0) {
-          const availableVariants = allVariants.slice(0, 3).map((v: any) => v.title).join(', ');
+          // Provide detailed error with available options
+          const sampleVariants = allVariants.slice(0, 5).map((v: any) => v.title);
+          const availableColors = new Set<string>();
+          const availableSizes = new Set<string>();
+          
+          // Extract available colors and sizes for better guidance
+          allVariants.forEach((v: any) => {
+            const title = v.title;
+            // Extract color (usually before / or -)
+            const colorMatch = title.match(/^([^\/\-]+?)(?:\s*[\/\-]|$)/);
+            if (colorMatch) availableColors.add(colorMatch[1].trim());
+            
+            // Extract size (usually after / or -)
+            const sizeMatch = title.match(/[\/\-]\s*([XSMLXL0-9]+)$/i);
+            if (sizeMatch) availableSizes.add(sizeMatch[1].trim().toUpperCase());
+          });
+          
           throw new Error(
-            `No variants could be created for this blueprint.\n` +
-            `Available variants: ${availableVariants}${allVariants.length > 3 ? ', ...' : ''}\n` +
-            `• Try using validate-variants tool first\n` +
-            `• Use create-product for more control over variant selection`
+            `❌ No variants could be created for blueprint ${blueprintId}\n\n` +
+            `📋 What went wrong:\n` +
+            `• Requested colors: ${requestedColors.join(', ') || 'none'}\n` +
+            `• Requested sizes: ${requestedSizes.join(', ') || 'none'}\n` +
+            `• No matching variants found\n\n` +
+            `✅ Available options:\n` +
+            `• Colors: ${Array.from(availableColors).slice(0, 5).join(', ')}${availableColors.size > 5 ? '...' : ''}\n` +
+            `• Sizes: ${Array.from(availableSizes).slice(0, 8).join(', ')}${availableSizes.size > 8 ? '...' : ''}\n` +
+            `• Sample variants: ${sampleVariants.join(', ')}${allVariants.length > 5 ? '...' : ''}\n\n` +
+            `💡 Solutions:\n` +
+            `1. Use common options: colors='white,black' sizes='M,L,XL'\n` +
+            `2. Check exact options: get-variants ${blueprintId} ${printProviderId}\n` +
+            `3. Validate first: validate-variants ${blueprintId} ${printProviderId}\n` +
+            `4. Use create-product for full control over variant selection`
           );
         }
 
@@ -385,9 +534,54 @@ function createUserMcpServer(session: UserSession) {
 
         let product;
         try {
+          debugLog(`Creating product with ${variants.length} variants`);
           product = await session.printifyClient.createProduct(productData);
         } catch (error: any) {
-          throw new Error(`Product creation failed: ${error.message}\n• Check that image ID ${imageId} is valid\n• Verify blueprint ${blueprintId} supports your image dimensions`);
+          // Enhanced error message with more context
+          const errorMessage = error.message || 'Unknown error';
+          
+          // Check for common error patterns
+          if (errorMessage.toLowerCase().includes('validation')) {
+            throw new Error(
+              `❌ Product creation validation failed\n\n` +
+              `📋 Error details: ${errorMessage}\n\n` +
+              `🔍 Common causes:\n` +
+              `• Invalid image ID: ${imageId}\n` +
+              `• Blueprint/provider mismatch\n` +
+              `• Variant configuration issues\n\n` +
+              `✅ Debug steps:\n` +
+              `1. Verify image upload: Check that upload-image returned ${imageId}\n` +
+              `2. Validate configuration: validate-product-config ${blueprintId} ${printProviderId} [${variants.map(v => v.variantId).slice(0,3).join(',')}...]\n` +
+              `3. Try with minimal options: colors='white' sizes='L'\n` +
+              `4. Enable debug mode: Set PRINTIFY_DEBUG=true for detailed logs`
+            );
+          } else if (errorMessage.toLowerCase().includes('image')) {
+            throw new Error(
+              `❌ Image-related error during product creation\n\n` +
+              `📋 Error: ${errorMessage}\n\n` +
+              `🖼️ Image ID: ${imageId}\n\n` +
+              `✅ Solutions:\n` +
+              `• Ensure image was uploaded successfully\n` +
+              `• Check image format (PNG/JPG recommended)\n` +
+              `• Verify image dimensions meet blueprint requirements\n` +
+              `• Re-upload image if needed`
+            );
+          } else {
+            throw new Error(
+              `❌ Product creation failed\n\n` +
+              `📋 Error: ${errorMessage}\n\n` +
+              `📊 Attempted configuration:\n` +
+              `• Blueprint: ${blueprintId}\n` +
+              `• Provider: ${printProviderId}\n` +
+              `• Variants: ${variants.length} selected\n` +
+              `• Image: ${imageId}\n\n` +
+              `✅ Troubleshooting:\n` +
+              `• Try validate-blueprint ${blueprintId} first\n` +
+              `• Check API status and connection\n` +
+              `• Use create-product for more control\n` +
+              `• Contact support if issue persists`
+            );
+          }
         }
         
         // Format success response using ResponseFormatter
