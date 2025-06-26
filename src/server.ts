@@ -59,16 +59,33 @@ const COLOR_MAPPINGS: {[key: string]: string} = {
   'azure': 'blue',
   'teal': 'blue',
   'turquoise': 'blue',
+  'cerulean': 'blue',
+  'sapphire': 'blue',
+  'indigo': 'blue',
+  'denim': 'blue',
+  'steel blue': 'blue',
+  'powder blue': 'blue',
   
   'jet black': 'black',
   'midnight': 'black',
-  'charcoal': 'gray',
+  'ebony': 'black',
+  'onyx': 'black',
+  'carbon': 'black',
+  'pitch black': 'black',
   
+  'charcoal': 'gray',
   'heather gray': 'gray',
   'heather grey': 'gray',
   'silver': 'gray',
   'ash': 'gray',
   'slate': 'gray',
+  'graphite': 'gray',
+  'smoke': 'gray',
+  'stone': 'gray',
+  'pewter': 'gray',
+  'concrete': 'gray',
+  'dove gray': 'gray',
+  'storm': 'gray',
   
   'off white': 'white',
   'off-white': 'white',
@@ -76,6 +93,12 @@ const COLOR_MAPPINGS: {[key: string]: string} = {
   'cream': 'white',
   'natural': 'white',
   'snow': 'white',
+  'pearl': 'white',
+  'bone': 'white',
+  'vanilla': 'white',
+  'eggshell': 'white',
+  'linen': 'white',
+  'antique white': 'white',
   
   'cardinal': 'red',
   'scarlet': 'red',
@@ -84,15 +107,30 @@ const COLOR_MAPPINGS: {[key: string]: string} = {
   'cherry': 'red',
   'ruby': 'red',
   'maroon': 'red',
+  'wine': 'red',
+  'brick': 'red',
+  'fire': 'red',
+  'flame': 'red',
+  'raspberry': 'red',
+  'blood red': 'red',
   
   'forest green': 'green',
+  'forest': 'green',
   'olive': 'green',
   'emerald': 'green',
   'mint': 'green',
   'sage': 'green',
   'lime': 'green',
   'kelly green': 'green',
+  'kelly': 'green',
   'hunter green': 'green',
+  'hunter': 'green',
+  'jade': 'green',
+  'sea green': 'green',
+  'pine': 'green',
+  'moss': 'green',
+  'shamrock': 'green',
+  'grass': 'green',
   
   'rose': 'pink',
   'blush': 'pink',
@@ -100,31 +138,57 @@ const COLOR_MAPPINGS: {[key: string]: string} = {
   'magenta': 'pink',
   'coral': 'pink',
   'salmon': 'pink',
+  'hot pink': 'pink',
+  'bubblegum': 'pink',
+  'carnation': 'pink',
+  'flamingo': 'pink',
+  'dusty rose': 'pink',
   
   'violet': 'purple',
   'lavender': 'purple',
   'plum': 'purple',
   'eggplant': 'purple',
   'orchid': 'purple',
+  'amethyst': 'purple',
+  'grape': 'purple',
+  'mauve': 'purple',
+  'lilac': 'purple',
+  'periwinkle': 'purple',
   
   'gold': 'yellow',
   'mustard': 'yellow',
   'lemon': 'yellow',
   'butter': 'yellow',
   'sunshine': 'yellow',
+  'canary': 'yellow',
+  'daffodil': 'yellow',
+  'honey': 'yellow',
+  'amber': 'yellow',
+  'corn': 'yellow',
   
   'rust': 'orange',
   'burnt orange': 'orange',
   'tangerine': 'orange',
   'peach': 'orange',
   'apricot': 'orange',
+  'pumpkin': 'orange',
+  'terracotta': 'orange',
+  'sunset': 'orange',
+  'copper': 'orange',
   
   'tan': 'brown',
   'beige': 'brown',
   'taupe': 'brown',
   'chocolate': 'brown',
   'coffee': 'brown',
-  'mocha': 'brown'
+  'mocha': 'brown',
+  'espresso': 'brown',
+  'caramel': 'brown',
+  'khaki': 'brown',
+  'sand': 'brown',
+  'chestnut': 'brown',
+  'walnut': 'brown',
+  'cocoa': 'brown'
 };
 
 // Normalize a color name to a standard color
@@ -142,7 +206,36 @@ function normalizeColorName(color: string): string {
     return COLOR_MAPPINGS[lowerColor];
   }
   
-  // Check if the color contains a standard color
+  // Remove common prefixes/suffixes and try again
+  const cleanedColor = lowerColor
+    .replace(/^(solid|heather|dark|light|bright|pale|deep|medium|vintage|classic)\s+/, '')
+    .replace(/\s+(heather|solid|blend)$/, '')
+    .trim();
+  
+  if (cleanedColor !== lowerColor && COLOR_MAPPINGS[cleanedColor]) {
+    return COLOR_MAPPINGS[cleanedColor];
+  }
+  
+  // Try fuzzy matching - find the best match
+  const colorWords = lowerColor.split(/[\s\-_]+/);
+  for (const word of colorWords) {
+    if (COLOR_MAPPINGS[word]) {
+      return COLOR_MAPPINGS[word];
+    }
+    // Check if the word is a standard color
+    if (standardColors.includes(word)) {
+      return word === 'grey' ? 'gray' : word;
+    }
+  }
+  
+  // Check if the color contains a standard color as substring
+  for (const [mappedColor, standardColor] of Object.entries(COLOR_MAPPINGS)) {
+    if (lowerColor.includes(mappedColor)) {
+      return standardColor;
+    }
+  }
+  
+  // Check standard colors as substrings
   for (const standardColor of standardColors) {
     if (lowerColor.includes(standardColor)) {
       return standardColor === 'grey' ? 'gray' : standardColor;
@@ -151,6 +244,51 @@ function normalizeColorName(color: string): string {
   
   // Return original if no mapping found
   return lowerColor;
+}
+
+// Helper function to extract validation errors from API responses
+function extractValidationErrors(error: any): { field: string; messages: string[] }[] {
+  const validationErrors: { field: string; messages: string[] }[] = [];
+  
+  // Try different error formats that Printify API might return
+  const errorSources = [
+    error.context?.errorDetails?.errors,
+    error.context?.errors,
+    error.errors,
+    error.response?.data?.errors,
+    error.response?.errors
+  ];
+  
+  for (const source of errorSources) {
+    if (source && typeof source === 'object') {
+      Object.entries(source).forEach(([field, errors]) => {
+        const messages = Array.isArray(errors) ? errors : [errors];
+        validationErrors.push({
+          field,
+          messages: messages.map(e => String(e))
+        });
+      });
+      break; // Found errors, stop looking
+    }
+  }
+  
+  // If no structured errors found, try to parse from message
+  if (validationErrors.length === 0 && error.message) {
+    const messageMatch = error.message.match(/Field errors: (.+)/s);
+    if (messageMatch) {
+      // Parse field errors from message
+      const fieldErrorsText = messageMatch[1];
+      const fieldMatches = fieldErrorsText.matchAll(/([\w.]+): (.+?)(?=\n|$)/g);
+      for (const match of fieldMatches) {
+        validationErrors.push({
+          field: match[1],
+          messages: [match[2]]
+        });
+      }
+    }
+  }
+  
+  return validationErrors;
 }
 
 // Store user sessions and their API keys
@@ -402,12 +540,62 @@ function createUserMcpServer(session: UserSession) {
         }
         
         const product = await session.printifyClient.createProduct(params);
+        
+        // Calculate pricing summary if variants are available
+        let pricingSummary = '';
+        if (product.variants && product.variants.length > 0) {
+          const enabledVariants = product.variants.filter((v: any) => v.is_enabled);
+          if (enabledVariants.length > 0) {
+            const prices = enabledVariants.map((v: any) => v.price);
+            const minPrice = Math.min(...prices);
+            const maxPrice = Math.max(...prices);
+            const avgPrice = prices.reduce((sum: number, p: number) => sum + p, 0) / prices.length;
+            
+            // Try to get cost information from variants data
+            let costInfo = '';
+            try {
+              const variantsData = await session.printifyClient.getVariants(
+                params.blueprintId.toString(),
+                params.printProviderId.toString()
+              );
+              if (variantsData.variants) {
+                const variantCosts = new Map();
+                variantsData.variants.forEach((v: any) => {
+                  variantCosts.set(v.id, v.cost);
+                });
+                
+                const costs = enabledVariants
+                  .map((v: any) => variantCosts.get(v.id))
+                  .filter((cost: any) => cost !== undefined);
+                
+                if (costs.length > 0) {
+                  const minCost = Math.min(...costs);
+                  const maxCost = Math.max(...costs);
+                  const avgCost = costs.reduce((sum: number, c: number) => sum + c, 0) / costs.length;
+                  const avgProfit = avgPrice - avgCost;
+                  const profitMargin = Math.round((avgProfit / avgPrice) * 100);
+                  
+                  costInfo = `\n💰 Pricing Analysis:\n`;
+                  costInfo += `• Cost range: ${minCost === maxCost ? `$${(minCost / 100).toFixed(2)}` : `$${(minCost / 100).toFixed(2)} - $${(maxCost / 100).toFixed(2)}`}\n`;
+                  costInfo += `• Selling price: ${minPrice === maxPrice ? `$${(minPrice / 100).toFixed(2)}` : `$${(minPrice / 100).toFixed(2)} - $${(maxPrice / 100).toFixed(2)}`}\n`;
+                  costInfo += `• Average profit: $${(avgProfit / 100).toFixed(2)} per item\n`;
+                  costInfo += `• Profit margin: ${profitMargin}%\n`;
+                }
+              }
+            } catch (error) {
+              // Ignore cost calculation errors
+            }
+            
+            pricingSummary = costInfo || `\n💰 Pricing:\n• Price range: ${minPrice === maxPrice ? `$${(minPrice / 100).toFixed(2)}` : `$${(minPrice / 100).toFixed(2)} - $${(maxPrice / 100).toFixed(2)}`}\n`;
+          }
+        }
+        
         const formattedResponse = ResponseFormatter.formatProductCreated(product, blueprint);
         
         return {
           content: [{
             type: "text",
-            text: formattedResponse
+            text: formattedResponse + pricingSummary
           }]
         };
       } catch (error: any) {
@@ -766,25 +954,21 @@ function createUserMcpServer(session: UserSession) {
             }
           }
           
+          // Add minimal debug info even without debug mode
+          let debugHint = '';
+          if (process.env.PRINTIFY_DEBUG !== 'true' && error.context) {
+            debugHint = '\n\n💡 Debug Tip: Enable PRINTIFY_DEBUG=true for detailed error logs';
+          }
+          
           // Check for common error patterns
           if (errorMessage.toLowerCase().includes('validation')) {
-            // Try to extract specific validation errors
+            // Extract validation errors using helper function
+            const validationErrors = extractValidationErrors(error);
             let specificErrors = '';
-            let fieldErrorDetails = {};
             
-            // Check multiple possible error formats
-            if (error.context && error.context.errorDetails && error.context.errorDetails.errors) {
-              fieldErrorDetails = error.context.errorDetails.errors;
-            } else if (error.context && error.context.errors) {
-              fieldErrorDetails = error.context.errors;
-            } else if (error.errors) {
-              fieldErrorDetails = error.errors;
-            }
-            
-            if (Object.keys(fieldErrorDetails).length > 0) {
+            if (validationErrors.length > 0) {
               specificErrors = '\n\n📌 Specific validation errors:\n';
-              Object.entries(fieldErrorDetails).forEach(([field, errors]: [string, any]) => {
-                const errorList = Array.isArray(errors) ? errors : [errors];
+              validationErrors.forEach(({ field, messages }) => {
                 // Map field names to user-friendly names
                 const fieldDisplayName = {
                   'title': 'Product Title',
@@ -794,9 +978,11 @@ function createUserMcpServer(session: UserSession) {
                   'variants': 'Variants',
                   'print_areas': 'Print Areas',
                   'print_areas.0.placeholders.0.images.0.id': 'Image ID',
-                  'print_areas.0.placeholders.0.images.0': 'Image configuration'
-                }[field] || field;
-                specificErrors += `• ${fieldDisplayName}: ${errorList.join(', ')}\n`;
+                  'print_areas.0.placeholders.0.images.0': 'Image configuration',
+                  'print_areas.front.placeholders.0.images.0.id': 'Front Image ID',
+                  'print_areas.back.placeholders.0.images.0.id': 'Back Image ID'
+                }[field] || field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                specificErrors += `• ${fieldDisplayName}: ${messages.join(', ')}\n`;
               });
             } else if (errorMessage.includes('Field errors:')) {
               // Error message already contains field errors from API
@@ -814,7 +1000,8 @@ function createUserMcpServer(session: UserSession) {
               `1. Verify image upload: Check that upload-image returned ${imageId}\n` +
               `2. Validate configuration: validate-product-config ${blueprintId} ${printProviderId} [${variants.map((v: any) => v.variantId).slice(0,3).join(',')}...]\n` +
               `3. Try with minimal options: colors='white' sizes='L'\n` +
-              `4. Enable debug mode: Set PRINTIFY_DEBUG=true for detailed logs`
+              `4. Enable debug mode: Set PRINTIFY_DEBUG=true for detailed logs` +
+              debugHint
             );
           } else if (errorMessage.toLowerCase().includes('image')) {
             throw new Error(
@@ -825,7 +1012,8 @@ function createUserMcpServer(session: UserSession) {
               `• Ensure image was uploaded successfully\n` +
               `• Check image format (PNG/JPG recommended)\n` +
               `• Verify image dimensions meet blueprint requirements\n` +
-              `• Re-upload image if needed`
+              `• Re-upload image if needed` +
+              debugHint
             );
           } else {
             throw new Error(
@@ -840,7 +1028,8 @@ function createUserMcpServer(session: UserSession) {
               `• Try validate-blueprint ${blueprintId} first\n` +
               `• Check API status and connection\n` +
               `• Use create-product for more control\n` +
-              `• Contact support if issue persists`
+              `• Contact support if issue persists` +
+              debugHint
             );
           }
         }
@@ -880,13 +1069,14 @@ function createUserMcpServer(session: UserSession) {
                 `• Cost range: ${pricingSummary.costRange}\n` +
                 `• Selling price: ${pricingSummary.priceRange}\n` +
                 `• Average profit: ${pricingSummary.avgProfit} per item\n` +
-                `• Profit margin: ${profitMargin} (actual: ${pricingSummary.avgMargin})\n\n`
+                `• Profit margin: ${profitMargin} (actual: ${pricingSummary.avgMargin})\n` +
+                `• Total potential profit: ${variants.length} variants × ${pricingSummary.avgProfit} = $${((parseFloat(pricingSummary.avgProfit.replace('$', '')) * variants.length).toFixed(2))}\n\n`
                 : '') +
               `✅ Next Steps:\n` +
               `• Use publish-product ${product.id} to make it available in your store\n` +
               `• Use get-product ${product.id} to view current status\n` +
               `• Use update-product ${product.id} to modify details if needed\n` +
-              `• Use calculate-pricing to adjust prices for different margins`
+              `• Use calculate-pricing to experiment with different profit margins`
           }]
         };
       } catch (error: any) {
