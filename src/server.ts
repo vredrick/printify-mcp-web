@@ -551,7 +551,7 @@ function createUserMcpServer(session: UserSession) {
               `• Variant configuration issues\n\n` +
               `✅ Debug steps:\n` +
               `1. Verify image upload: Check that upload-image returned ${imageId}\n` +
-              `2. Validate configuration: validate-product-config ${blueprintId} ${printProviderId} [${variants.map(v => v.variantId).slice(0,3).join(',')}...]\n` +
+              `2. Validate configuration: validate-product-config ${blueprintId} ${printProviderId} [${variants.map((v: any) => v.variantId).slice(0,3).join(',')}...]\n` +
               `3. Try with minimal options: colors='white' sizes='L'\n` +
               `4. Enable debug mode: Set PRINTIFY_DEBUG=true for detailed logs`
             );
