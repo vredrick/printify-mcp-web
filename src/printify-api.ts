@@ -71,6 +71,7 @@ export interface PrintifyProduct {
   user_id: number;
   shop_id: number;
   sales_channel_properties: any;
+  print_areas?: any[];
 }
 
 export interface PrintifyImage {
@@ -201,6 +202,9 @@ export class ResponseFormatter {
     output += `Blueprint ${blueprintId} → Provider ${printProviderId}\n`;
     output += `═══════════════════════════════════════\n\n`;
 
+    // Show total count upfront
+    output += `📊 Total variants: ${variants.length}\n\n`;
+
     // Group variants by color for better readability
     const variantsByColor = new Map<string, any[]>();
     
@@ -216,22 +220,56 @@ export class ResponseFormatter {
       variantsByColor.get(color)!.push(variant);
     });
 
-    // Display grouped variants
+    // Limit display for large variant sets
+    const maxColorsToShow = 5;
+    const maxVariantsPerColor = 8;
+    let colorsShown = 0;
+    let totalVariantsShown = 0;
+    const totalColors = variantsByColor.size;
+
+    // Display grouped variants with limits
     for (const [color, colorVariants] of variantsByColor) {
-      output += `🎨 ${color}:\n`;
-      colorVariants.forEach(variant => {
+      if (colorsShown >= maxColorsToShow) {
+        output += `\n... and ${totalColors - colorsShown} more colors (${variants.length - totalVariantsShown} variants)\n`;
+        break;
+      }
+      
+      output += `🎨 ${color}: (${colorVariants.length} variants)\n`;
+      
+      const variantsToShow = Math.min(colorVariants.length, maxVariantsPerColor);
+      for (let i = 0; i < variantsToShow; i++) {
+        const variant = colorVariants[i];
         const sizeMatch = variant.title.match(/\/\s*(.+)$/);
         const size = sizeMatch ? sizeMatch[1].trim() : 'One Size';
-        const cost = variant.cost ? `$${(variant.cost / 100).toFixed(2)}` : 'N/A';
-        output += `  • ID ${variant.id}: ${size} (Base cost: ${cost})\n`;
-      });
+        const cost = variant.cost !== undefined && variant.cost !== null ? `$${(variant.cost / 100).toFixed(2)}` : 'N/A';
+        output += `  • ID ${variant.id}: ${size} (${cost})\n`;
+        totalVariantsShown++;
+      }
+      
+      if (colorVariants.length > maxVariantsPerColor) {
+        output += `  ... and ${colorVariants.length - maxVariantsPerColor} more sizes\n`;
+      }
+      
       output += `\n`;
+      colorsShown++;
+    }
+
+    // Add summary for large sets
+    if (variants.length > 20) {
+      output += `📈 Summary:\n`;
+      output += `• ${totalColors} colors available\n`;
+      output += `• ${variants.length} total variants\n`;
+      output += `• Use validate-variants to check specific color/size combinations\n\n`;
     }
 
     output += `💡 Next Steps:\n`;
     output += `• Use these variant IDs in create-product variants array\n`;
     output += `• Use calculate-pricing to determine selling prices\n`;
-    output += `• Use validate-variants to check compatibility before creating product\n`;
+    output += `• Use validate-variants to check specific combinations\n`;
+    
+    if (variants.length > 30) {
+      output += `• Consider using create-product-simple for automatic variant selection\n`;
+    }
 
     return output;
   }

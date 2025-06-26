@@ -112,10 +112,36 @@ function createUserMcpServer(session: UserSession) {
     {},
     async () => {
       const shops = await session.printifyClient.getShops();
+      
+      let output = `🏪 Available Shops\n`;
+      output += `═══════════════\n\n`;
+      
+      if (!shops || shops.length === 0) {
+        output += `❌ No shops found\n\n`;
+        output += `💡 Tips:\n`;
+        output += `• Ensure your Printify API key has access to shops\n`;
+        output += `• Check your Printify account has connected stores\n`;
+      } else {
+        const currentShopId = session.printifyClient.shopId;
+        
+        shops.forEach((shop: any, index: number) => {
+          const isCurrent = String(shop.id) === String(currentShopId);
+          output += `${isCurrent ? '→ ' : '  '}${index + 1}. ${shop.title}\n`;
+          output += `     ID: ${shop.id}\n`;
+          output += `     Channel: ${shop.sales_channel || 'Unknown'}\n`;
+          if (isCurrent) output += `     (Current Shop)\n`;
+          output += `\n`;
+        });
+        
+        output += `💡 Actions:\n`;
+        output += `• Switch shop: switch-shop {shop_id}\n`;
+        output += `• View products: list-products\n`;
+      }
+      
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(shops, null, 2)
+          text: output
         }]
       };
     }
@@ -147,10 +173,45 @@ function createUserMcpServer(session: UserSession) {
     },
     async ({ page, limit }) => {
       const products = await session.printifyClient.getProducts(page, limit);
+      
+      let output = `📦 Product List\n`;
+      output += `═══════════════\n\n`;
+      
+      if (!products.data || products.data.length === 0) {
+        output += `❌ No products found\n\n`;
+        output += `💡 Get started:\n`;
+        output += `• Create your first product: create-product-simple\n`;
+        output += `• Browse blueprints: get-popular-blueprints\n`;
+        output += `• Upload a design: upload-image\n`;
+      } else {
+        output += `📊 Page ${products.current_page} of ${products.last_page} (${products.total} total products)\n\n`;
+        
+        products.data.forEach((product: any, index: number) => {
+          const num = (page - 1) * limit + index + 1;
+          output += `${num}. ${product.title}\n`;
+          output += `   🆔 ID: ${product.id}\n`;
+          output += `   📋 Blueprint: ${product.blueprint_id}\n`;
+          output += `   👕 Variants: ${product.variants?.filter((v: any) => v.is_enabled).length || 0} enabled\n`;
+          output += `   👁️ Status: ${product.visible ? 'Published' : 'Draft'}\n`;
+          output += `   📅 Created: ${new Date(product.created_at).toLocaleDateString()}\n`;
+          output += `\n`;
+        });
+        
+        output += `📄 Pagination:\n`;
+        if (page > 1) output += `• Previous: list-products page=${page - 1} limit=${limit}\n`;
+        if (page < products.last_page) output += `• Next: list-products page=${page + 1} limit=${limit}\n`;
+        output += `\n`;
+        
+        output += `💡 Actions:\n`;
+        output += `• View details: get-product {product_id}\n`;
+        output += `• Create new: create-product-simple\n`;
+        output += `• Update: update-product {product_id}\n`;
+      }
+      
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(products, null, 2)
+          text: output
         }]
       };
     }
@@ -164,10 +225,38 @@ function createUserMcpServer(session: UserSession) {
     },
     async ({ productId }) => {
       const product = await session.printifyClient.getProduct(productId);
+      
+      let output = `📋 Product Details\n`;
+      output += `═══════════════════\n\n`;
+      output += `🆔 ID: ${product.id}\n`;
+      output += `📝 Title: ${product.title}\n`;
+      output += `📄 Description: ${product.description || 'No description'}\n`;
+      output += `🏷️ Tags: ${product.tags?.join(', ') || 'No tags'}\n`;
+      output += `📋 Blueprint: ${product.blueprint_id}\n`;
+      output += `🖨️ Print Provider: ${product.print_provider_id}\n`;
+      output += `👁️ Visible: ${product.visible ? 'Yes' : 'No'}\n`;
+      output += `📅 Created: ${new Date(product.created_at).toLocaleDateString()}\n`;
+      output += `🔄 Updated: ${new Date(product.updated_at).toLocaleDateString()}\n\n`;
+      
+      output += `👕 Variants: ${product.variants?.length || 0}\n`;
+      if (product.variants && product.variants.length > 0) {
+        const enabledVariants = product.variants.filter((v: any) => v.is_enabled);
+        output += `  • Enabled: ${enabledVariants.length}\n`;
+        output += `  • Disabled: ${product.variants.length - enabledVariants.length}\n`;
+      }
+      
+      output += `🖼️ Images: ${product.images?.length || 0}\n`;
+      output += `📐 Print Areas: ${product.print_areas?.length || 0} configured\n\n`;
+      
+      output += `💡 Actions:\n`;
+      output += `• Update: update-product ${product.id}\n`;
+      output += `• Publish: publish-product ${product.id}\n`;
+      output += `• Delete: delete-product ${product.id}\n`;
+      
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(product, null, 2)
+          text: output
         }]
       };
     }
@@ -259,11 +348,18 @@ function createUserMcpServer(session: UserSession) {
           warnings.push("Title is very long (>100 chars) - consider shortening for better display");
         }
         
-        // Image ID validation
+        // Description validation - ensure default is applied
+        const finalDescription = description || "";
+        
+        // Image ID validation - more flexible regex
         if (!imageId || imageId.trim().length === 0) {
           validationErrors.push("Image ID is required - use upload-image first");
         } else if (!imageId.match(/^[a-zA-Z0-9]{24}$/)) {
-          warnings.push(`Image ID format looks unusual: ${imageId} - ensure it's from upload-image`);
+          // Printify image IDs are typically 24 alphanumeric characters
+          // Don't error out, just warn if format looks different
+          if (!imageId.match(/^[a-zA-Z0-9_-]{16,32}$/)) {
+            warnings.push(`Image ID format looks unusual: ${imageId} - ensure it's from upload-image`);
+          }
         }
         
         // Blueprint ID validation
@@ -290,7 +386,15 @@ function createUserMcpServer(session: UserSession) {
         if (!marginMatch) {
           validationErrors.push("Invalid profit margin format - use '50%' or '0.5'");
         } else {
-          const marginValue = parseFloat(marginMatch[1]);
+          let marginValue = parseFloat(marginMatch[1]);
+          // If value is greater than 1 and has %, treat as percentage
+          if (profitMargin.includes('%') && marginValue > 1) {
+            // This is fine, it's a percentage like 50%
+          } else if (!profitMargin.includes('%') && marginValue > 1) {
+            // Assume it's meant to be a percentage (e.g., 50 means 50%)
+            marginValue = marginValue;
+          }
+          
           if (marginValue < 10) {
             warnings.push("Low profit margin (<10%) - consider increasing for sustainability");
           } else if (marginValue > 200) {
@@ -516,7 +620,7 @@ function createUserMcpServer(session: UserSession) {
         // STEP 6: Create product with error recovery
         const productData = {
           title: title.trim(),
-          description: description.trim(),
+          description: finalDescription.trim(),
           blueprintId,
           printProviderId,
           variants,
@@ -540,11 +644,29 @@ function createUserMcpServer(session: UserSession) {
           // Enhanced error message with more context
           const errorMessage = error.message || 'Unknown error';
           
+          // Log full error details in debug mode
+          if (process.env.PRINTIFY_DEBUG === 'true') {
+            console.log('[DEBUG] create-product-simple full error:', error);
+            if (error.context) {
+              console.log('[DEBUG] Error context:', JSON.stringify(error.context, null, 2));
+            }
+          }
+          
           // Check for common error patterns
           if (errorMessage.toLowerCase().includes('validation')) {
+            // Try to extract specific validation errors
+            let specificErrors = '';
+            if (error.context && error.context.errors) {
+              specificErrors = '\n\n📌 Specific errors:\n';
+              Object.entries(error.context.errors).forEach(([field, errors]: [string, any]) => {
+                const errorList = Array.isArray(errors) ? errors : [errors];
+                specificErrors += `• ${field}: ${errorList.join(', ')}\n`;
+              });
+            }
+            
             throw new Error(
               `❌ Product creation validation failed\n\n` +
-              `📋 Error details: ${errorMessage}\n\n` +
+              `📋 Error details: ${errorMessage}${specificErrors}\n\n` +
               `🔍 Common causes:\n` +
               `• Invalid image ID: ${imageId}\n` +
               `• Blueprint/provider mismatch\n` +
@@ -646,7 +768,16 @@ function createUserMcpServer(session: UserSession) {
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(product, null, 2)
+          text: `✅ Product Updated Successfully!\n` +
+            `═══════════════════════════════\n\n` +
+            `🆔 Product ID: ${product.id}\n` +
+            `📝 Title: ${product.title}\n` +
+            `📄 Description: ${product.description || 'No description'}\n` +
+            `👕 Variants: ${product.variants?.length || 0} configured\n` +
+            `👁️ Visible: ${product.visible ? 'Yes' : 'No'}\n\n` +
+            `💡 Next Steps:\n` +
+            `• Use get-product ${product.id} to view full details\n` +
+            `• Use publish-product ${product.id} to make changes live\n`
         }]
       };
     }
@@ -687,7 +818,20 @@ function createUserMcpServer(session: UserSession) {
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(result, null, 2)
+          text: `✅ Product Published Successfully!\n` +
+            `═══════════════════════════════\n\n` +
+            `🆔 Product ID: ${productId}\n` +
+            `🏪 Shop: Product is now live in your store\n` +
+            `📋 Published elements:\n` +
+            `  • Title: ${publishDetails?.title !== false ? '✓' : '✗'}\n` +
+            `  • Description: ${publishDetails?.description !== false ? '✓' : '✗'}\n` +
+            `  • Images: ${publishDetails?.images !== false ? '✓' : '✗'}\n` +
+            `  • Variants: ${publishDetails?.variants !== false ? '✓' : '✗'}\n` +
+            `  • Tags: ${publishDetails?.tags !== false ? '✓' : '✗'}\n\n` +
+            `💡 Next Steps:\n` +
+            `• Check your store to see the live product\n` +
+            `• Use update-product ${productId} to make changes\n` +
+            `• Monitor sales and adjust pricing as needed\n`
         }]
       };
     }
@@ -709,7 +853,18 @@ function createUserMcpServer(session: UserSession) {
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(image, null, 2)
+          text: `✅ Image Uploaded Successfully!\n` +
+            `═══════════════════════════════\n\n` +
+            `🆔 Image ID: ${image.id}\n` +
+            `📁 File name: ${image.file_name}\n` +
+            `📐 Dimensions: ${image.width} × ${image.height} px\n` +
+            `💾 Size: ${(image.size / 1024 / 1024).toFixed(2)} MB\n` +
+            `🖼️ Type: ${image.mime_type}\n` +
+            `🔗 Preview: ${image.preview_url}\n\n` +
+            `💡 Next Steps:\n` +
+            `• Use this Image ID (${image.id}) in create-product or create-product-simple\n` +
+            `• Ensure the image meets blueprint requirements (300 DPI recommended)\n` +
+            `• For best results, use PNG format for designs with transparency\n`
         }]
       };
     }
@@ -1138,10 +1293,33 @@ ${isValid ? 'This product data should work with create-product.' : 'Fix the issu
       async (params) => {
         const imagePath = await session.replicateClient!.generateImage(params.prompt, params);
         const image = await session.printifyClient.uploadImage(params.fileName, imagePath);
+        
+        let output = `✅ AI Image Generated & Uploaded Successfully!\n`;
+        output += `═══════════════════════════════════════════\n\n`;
+        output += `🎨 Generation Details:\n`;
+        output += `• Prompt: "${params.prompt}"\n`;
+        output += `• Dimensions: ${params.width || 1024} × ${params.height || 1024} px\n`;
+        if (params.aspectRatio) output += `• Aspect Ratio: ${params.aspectRatio}\n`;
+        output += `• Inference Steps: ${params.numInferenceSteps || 25}\n`;
+        output += `• Guidance Scale: ${params.guidanceScale || 7.5}\n\n`;
+        
+        output += `📤 Upload Details:\n`;
+        output += `• Image ID: ${image.id}\n`;
+        output += `• File name: ${image.file_name}\n`;
+        output += `• Final dimensions: ${image.width} × ${image.height} px\n`;
+        output += `• Size: ${(image.size / 1024 / 1024).toFixed(2)} MB\n`;
+        output += `• Type: ${image.mime_type}\n`;
+        output += `• Preview: ${image.preview_url}\n\n`;
+        
+        output += `💡 Next Steps:\n`;
+        output += `• Use Image ID (${image.id}) in create-product or create-product-simple\n`;
+        output += `• Generate variations by using the same prompt with different seeds\n`;
+        output += `• Ensure the design works well on your chosen product blueprint\n`;
+        
         return {
           content: [{
             type: "text",
-            text: JSON.stringify(image, null, 2)
+            text: output
           }]
         };
       }
@@ -1505,7 +1683,7 @@ ${isValid ? 'This product data should work with create-product.' : 'Fix the issu
           const sampleVariants = matchingVariants.slice(0, 5);
           output += `📋 Sample matching variants:\n`;
           sampleVariants.forEach((variant: any) => {
-            const cost = variant.cost ? `$${(variant.cost / 100).toFixed(2)}` : 'N/A';
+            const cost = variant.cost !== undefined && variant.cost !== null ? `$${(variant.cost / 100).toFixed(2)}` : 'N/A';
             output += `  • ID ${variant.id}: ${variant.title} (${cost})\n`;
           });
           
