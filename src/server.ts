@@ -46,6 +46,113 @@ app.use((req, res, next) => {
   next();
 });
 
+// Color normalization helper functions
+const COLOR_MAPPINGS: {[key: string]: string} = {
+  // Primary mappings - map variants to standard colors
+  'carolina blue': 'blue',
+  'sky blue': 'blue',
+  'baby blue': 'blue',
+  'royal blue': 'blue',
+  'navy blue': 'blue',
+  'ocean blue': 'blue',
+  'cobalt': 'blue',
+  'azure': 'blue',
+  'teal': 'blue',
+  'turquoise': 'blue',
+  
+  'jet black': 'black',
+  'midnight': 'black',
+  'charcoal': 'gray',
+  
+  'heather gray': 'gray',
+  'heather grey': 'gray',
+  'silver': 'gray',
+  'ash': 'gray',
+  'slate': 'gray',
+  
+  'off white': 'white',
+  'off-white': 'white',
+  'ivory': 'white',
+  'cream': 'white',
+  'natural': 'white',
+  'snow': 'white',
+  
+  'cardinal': 'red',
+  'scarlet': 'red',
+  'crimson': 'red',
+  'burgundy': 'red',
+  'cherry': 'red',
+  'ruby': 'red',
+  'maroon': 'red',
+  
+  'forest green': 'green',
+  'olive': 'green',
+  'emerald': 'green',
+  'mint': 'green',
+  'sage': 'green',
+  'lime': 'green',
+  'kelly green': 'green',
+  'hunter green': 'green',
+  
+  'rose': 'pink',
+  'blush': 'pink',
+  'fuchsia': 'pink',
+  'magenta': 'pink',
+  'coral': 'pink',
+  'salmon': 'pink',
+  
+  'violet': 'purple',
+  'lavender': 'purple',
+  'plum': 'purple',
+  'eggplant': 'purple',
+  'orchid': 'purple',
+  
+  'gold': 'yellow',
+  'mustard': 'yellow',
+  'lemon': 'yellow',
+  'butter': 'yellow',
+  'sunshine': 'yellow',
+  
+  'rust': 'orange',
+  'burnt orange': 'orange',
+  'tangerine': 'orange',
+  'peach': 'orange',
+  'apricot': 'orange',
+  
+  'tan': 'brown',
+  'beige': 'brown',
+  'taupe': 'brown',
+  'chocolate': 'brown',
+  'coffee': 'brown',
+  'mocha': 'brown'
+};
+
+// Normalize a color name to a standard color
+function normalizeColorName(color: string): string {
+  const lowerColor = color.toLowerCase().trim();
+  
+  // Check if it's already a standard color
+  const standardColors = ['white', 'black', 'gray', 'grey', 'red', 'blue', 'green', 'pink', 'purple', 'yellow', 'orange', 'brown', 'navy'];
+  if (standardColors.includes(lowerColor)) {
+    return lowerColor === 'grey' ? 'gray' : lowerColor; // Normalize grey to gray
+  }
+  
+  // Check color mappings
+  if (COLOR_MAPPINGS[lowerColor]) {
+    return COLOR_MAPPINGS[lowerColor];
+  }
+  
+  // Check if the color contains a standard color
+  for (const standardColor of standardColors) {
+    if (lowerColor.includes(standardColor)) {
+      return standardColor === 'grey' ? 'gray' : standardColor;
+    }
+  }
+  
+  // Return original if no mapping found
+  return lowerColor;
+}
+
 // Store user sessions and their API keys
 interface UserSession {
   printifyApiKey: string;
@@ -473,7 +580,9 @@ function createUserMcpServer(session: UserSession) {
         }
         
         // STEP 5: Enhanced variant filtering with improved matching
-        const requestedColors = includeColors.toLowerCase().split(',').map(c => c.trim()).filter(c => c.length > 0);
+        // Normalize color names first
+        const requestedColors = includeColors.toLowerCase().split(',').map(c => c.trim()).filter(c => c.length > 0)
+          .map(color => normalizeColorName(color));
         const requestedSizes = includeSizes.toUpperCase().split(',').map(s => s.trim()).filter(s => s.length > 0);
         
         const allVariants = variantsData.variants || [];
@@ -490,14 +599,19 @@ function createUserMcpServer(session: UserSession) {
           // Direct match
           if (titleLower.includes(colorLower)) return true;
           
-          // Handle common variations
+          // Handle common variations - expanded color mapping
           const colorVariations: {[key: string]: string[]} = {
-            'white': ['white', 'solid white', 'natural', 'cream'],
-            'black': ['black', 'solid black', 'dark'],
-            'gray': ['gray', 'grey', 'heather gray', 'heather grey', 'charcoal'],
-            'red': ['red', 'cardinal', 'scarlet', 'crimson'],
-            'blue': ['blue', 'navy', 'royal blue', 'sapphire'],
-            'green': ['green', 'forest', 'olive', 'emerald']
+            'white': ['white', 'solid white', 'natural', 'cream', 'ivory', 'off-white', 'snow'],
+            'black': ['black', 'solid black', 'dark', 'jet black', 'midnight'],
+            'gray': ['gray', 'grey', 'heather gray', 'heather grey', 'charcoal', 'silver', 'ash', 'slate'],
+            'red': ['red', 'cardinal', 'scarlet', 'crimson', 'burgundy', 'cherry', 'ruby', 'maroon'],
+            'blue': ['blue', 'navy', 'royal blue', 'sapphire', 'carolina blue', 'sky blue', 'baby blue', 'ocean', 'cobalt', 'azure', 'teal'],
+            'green': ['green', 'forest', 'olive', 'emerald', 'mint', 'sage', 'lime', 'kelly green', 'hunter green'],
+            'pink': ['pink', 'rose', 'blush', 'fuchsia', 'magenta', 'coral', 'salmon'],
+            'purple': ['purple', 'violet', 'lavender', 'plum', 'eggplant', 'orchid'],
+            'yellow': ['yellow', 'gold', 'mustard', 'lemon', 'butter', 'sunshine'],
+            'orange': ['orange', 'rust', 'burnt orange', 'tangerine', 'peach', 'apricot'],
+            'brown': ['brown', 'tan', 'beige', 'taupe', 'chocolate', 'coffee', 'mocha']
           };
           
           // Check if requested color has variations
@@ -656,12 +770,37 @@ function createUserMcpServer(session: UserSession) {
           if (errorMessage.toLowerCase().includes('validation')) {
             // Try to extract specific validation errors
             let specificErrors = '';
-            if (error.context && error.context.errors) {
-              specificErrors = '\n\n📌 Specific errors:\n';
-              Object.entries(error.context.errors).forEach(([field, errors]: [string, any]) => {
+            let fieldErrorDetails = {};
+            
+            // Check multiple possible error formats
+            if (error.context && error.context.errorDetails && error.context.errorDetails.errors) {
+              fieldErrorDetails = error.context.errorDetails.errors;
+            } else if (error.context && error.context.errors) {
+              fieldErrorDetails = error.context.errors;
+            } else if (error.errors) {
+              fieldErrorDetails = error.errors;
+            }
+            
+            if (Object.keys(fieldErrorDetails).length > 0) {
+              specificErrors = '\n\n📌 Specific validation errors:\n';
+              Object.entries(fieldErrorDetails).forEach(([field, errors]: [string, any]) => {
                 const errorList = Array.isArray(errors) ? errors : [errors];
-                specificErrors += `• ${field}: ${errorList.join(', ')}\n`;
+                // Map field names to user-friendly names
+                const fieldDisplayName = {
+                  'title': 'Product Title',
+                  'description': 'Description', 
+                  'blueprint_id': 'Blueprint ID',
+                  'print_provider_id': 'Print Provider ID',
+                  'variants': 'Variants',
+                  'print_areas': 'Print Areas',
+                  'print_areas.0.placeholders.0.images.0.id': 'Image ID',
+                  'print_areas.0.placeholders.0.images.0': 'Image configuration'
+                }[field] || field;
+                specificErrors += `• ${fieldDisplayName}: ${errorList.join(', ')}\n`;
               });
+            } else if (errorMessage.includes('Field errors:')) {
+              // Error message already contains field errors from API
+              specificErrors = ''; // Don't duplicate
             }
             
             throw new Error(
@@ -706,6 +845,25 @@ function createUserMcpServer(session: UserSession) {
           }
         }
         
+        // Calculate pricing summary
+        const pricingSummary = variants.length > 0 ? (() => {
+          const costs = filteredVariants.map((v: any) => v.cost);
+          const minCost = Math.min(...costs);
+          const maxCost = Math.max(...costs);
+          const avgCost = costs.reduce((a: number, b: number) => a + b, 0) / costs.length;
+          
+          const minPrice = Math.min(...variants.map((v: any) => v.price));
+          const maxPrice = Math.max(...variants.map((v: any) => v.price));
+          const avgPrice = variants.reduce((sum: number, v: any) => sum + v.price, 0) / variants.length;
+          
+          return {
+            costRange: minCost === maxCost ? `$${(minCost / 100).toFixed(2)}` : `$${(minCost / 100).toFixed(2)} - $${(maxCost / 100).toFixed(2)}`,
+            priceRange: minPrice === maxPrice ? `$${(minPrice / 100).toFixed(2)}` : `$${(minPrice / 100).toFixed(2)} - $${(maxPrice / 100).toFixed(2)}`,
+            avgProfit: `$${((avgPrice - avgCost) / 100).toFixed(2)}`,
+            avgMargin: `${Math.round(((avgPrice - avgCost) / avgPrice) * 100)}%`
+          };
+        })() : null;
+        
         // Format success response using ResponseFormatter
         const formattedResponse = ResponseFormatter.formatProductCreated(product, blueprint);
         
@@ -715,12 +873,20 @@ function createUserMcpServer(session: UserSession) {
             text: formattedResponse + `\n\n📊 Creation Summary:\n` +
               `• Blueprint: ${blueprint.title} (ID: ${blueprintId})\n` +
               `• Variants: ${variants.length} enabled\n` +
-              `• Profit margin: ${profitMargin}\n` +
-              `• Filters applied: ${requestedColors.join(', ')} | ${requestedSizes.join(', ')}\n\n` +
+              `• Colors selected: ${requestedColors.length > 0 ? requestedColors.join(', ') : 'all available'}\n` +
+              `• Sizes selected: ${requestedSizes.length > 0 ? requestedSizes.join(', ') : 'all available'}\n\n` +
+              (pricingSummary ? 
+                `💰 Pricing Details:\n` +
+                `• Cost range: ${pricingSummary.costRange}\n` +
+                `• Selling price: ${pricingSummary.priceRange}\n` +
+                `• Average profit: ${pricingSummary.avgProfit} per item\n` +
+                `• Profit margin: ${profitMargin} (actual: ${pricingSummary.avgMargin})\n\n`
+                : '') +
               `✅ Next Steps:\n` +
-              `• Use publish-product to make it available in your store\n` +
+              `• Use publish-product ${product.id} to make it available in your store\n` +
               `• Use get-product ${product.id} to view current status\n` +
-              `• Use update-product to modify details if needed`
+              `• Use update-product ${product.id} to modify details if needed\n` +
+              `• Use calculate-pricing to adjust prices for different margins`
           }]
         };
       } catch (error: any) {
@@ -1851,6 +2017,138 @@ ${isValid ? 'This product data should work with create-product.' : 'Fix the issu
           }]
         };
       }
+    }
+  );
+
+  // Get available colors tool
+  server.tool(
+    "get-available-colors",
+    {
+      blueprintId: z.string().describe("Blueprint ID"),
+      printProviderId: z.string().optional().describe("Print provider ID (optional, uses first provider if not specified)")
+    },
+    async ({ blueprintId, printProviderId }) => {
+      try {
+        // Get print provider if not specified
+        let providerId = printProviderId;
+        if (!providerId) {
+          const providers = await session.printifyClient.getPrintProviders(blueprintId);
+          if (!providers || providers.length === 0) {
+            throw new Error(`No print providers available for blueprint ${blueprintId}`);
+          }
+          providerId = providers[0].id.toString();
+        }
+        
+        // Get variants
+        const variantsData = await session.printifyClient.getVariants(blueprintId, providerId!);
+        const allVariants = variantsData.variants || [];
+        
+        // Extract unique colors
+        const colorMap = new Map<string, number>();
+        allVariants.forEach((variant: any) => {
+          const colorMatch = variant.title.match(/^([^\/]+)/);
+          if (colorMatch) {
+            const color = colorMatch[1].trim().toLowerCase();
+            colorMap.set(color, (colorMap.get(color) || 0) + 1);
+          }
+        });
+        
+        const colors = Array.from(colorMap.entries())
+          .sort((a, b) => b[1] - a[1]) // Sort by count descending
+          .map(([color, count]) => ({ color, count }));
+        
+        let output = `🎨 Available Colors for Blueprint ${blueprintId}\n`;
+        output += `═══════════════════════════════════════\n\n`;
+        output += `🖨️ Provider: ${providerId}\n`;
+        output += `📊 Total colors: ${colors.length}\n\n`;
+        
+        output += `🎨 Colors (with variant count):\n`;
+        colors.forEach(({ color, count }) => {
+          output += `  • ${color}: ${count} variant${count > 1 ? 's' : ''}\n`;
+        });
+        
+        output += `\n💡 Usage Tips:\n`;
+        output += `• Use these exact color names in create-product-simple\n`;
+        output += `• Common mappings: 'carolina blue' → 'blue', 'heather grey' → 'gray'\n`;
+        output += `• Use normalize-color-name to convert non-standard colors\n`;
+        output += `• Some colors may have variations (e.g., 'solid white' vs 'white')\n`;
+        
+        return {
+          content: [{
+            type: "text",
+            text: output
+          }]
+        };
+      } catch (error: any) {
+        const formattedError = ResponseFormatter.formatError(error, `getting available colors for blueprint ${blueprintId}`);
+        
+        return {
+          isError: true,
+          content: [{
+            type: "text",
+            text: formattedError
+          }]
+        };
+      }
+    }
+  );
+
+  // Normalize color name tool
+  server.tool(
+    "normalize-color-name",
+    {
+      color: z.string().describe("Color name to normalize (e.g., 'Carolina Blue', 'Heather Grey')")
+    },
+    async ({ color }) => {
+      const normalizedColor = normalizeColorName(color);
+      const isStandardColor = normalizedColor === color.toLowerCase();
+      
+      let output = `🎨 Color Normalization\n`;
+      output += `══════════════════\n\n`;
+      output += `📥 Input: "${color}"\n`;
+      output += `📤 Normalized: "${normalizedColor}"\n`;
+      output += `✅ Status: ${isStandardColor ? 'Already standard' : 'Mapped to standard color'}\n\n`;
+      
+      if (!isStandardColor) {
+        output += `💡 Mapping Info:\n`;
+        output += `• "${color}" is mapped to the standard color "${normalizedColor}"\n`;
+        output += `• This helps match more variants when filtering\n`;
+        output += `• Use "${normalizedColor}" in create-product-simple for best results\n`;
+      } else {
+        output += `💡 This is already a standard color name\n`;
+      }
+      
+      // Show related variations
+      const colorVariations: {[key: string]: string[]} = {
+        'white': ['white', 'solid white', 'natural', 'cream', 'ivory', 'off-white', 'snow'],
+        'black': ['black', 'solid black', 'dark', 'jet black', 'midnight'],
+        'gray': ['gray', 'grey', 'heather gray', 'heather grey', 'charcoal', 'silver', 'ash', 'slate'],
+        'red': ['red', 'cardinal', 'scarlet', 'crimson', 'burgundy', 'cherry', 'ruby', 'maroon'],
+        'blue': ['blue', 'navy', 'royal blue', 'sapphire', 'carolina blue', 'sky blue', 'baby blue', 'ocean', 'cobalt', 'azure', 'teal'],
+        'green': ['green', 'forest', 'olive', 'emerald', 'mint', 'sage', 'lime', 'kelly green', 'hunter green'],
+        'pink': ['pink', 'rose', 'blush', 'fuchsia', 'magenta', 'coral', 'salmon'],
+        'purple': ['purple', 'violet', 'lavender', 'plum', 'eggplant', 'orchid'],
+        'yellow': ['yellow', 'gold', 'mustard', 'lemon', 'butter', 'sunshine'],
+        'orange': ['orange', 'rust', 'burnt orange', 'tangerine', 'peach', 'apricot'],
+        'brown': ['brown', 'tan', 'beige', 'taupe', 'chocolate', 'coffee', 'mocha']
+      };
+      
+      const variations = colorVariations[normalizedColor];
+      if (variations && variations.length > 1) {
+        output += `\n🔄 Related variations that map to "${normalizedColor}":\n`;
+        variations.forEach(v => {
+          if (v !== normalizedColor) {
+            output += `  • ${v}\n`;
+          }
+        });
+      }
+      
+      return {
+        content: [{
+          type: "text",
+          text: output
+        }]
+      };
     }
   );
 

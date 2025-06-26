@@ -509,7 +509,17 @@ export class PrintifyAPI {
               const fieldErrors = Object.entries(errorJson.errors)
                 .map(([field, errors]: [string, any]) => {
                   const errorList = Array.isArray(errors) ? errors : [errors];
-                  return `  ${field}: ${errorList.join(', ')}`;
+                  // Map field names to user-friendly names
+                  const fieldDisplayName = {
+                    'title': 'Product Title',
+                    'description': 'Description',
+                    'blueprint_id': 'Blueprint ID',
+                    'print_provider_id': 'Print Provider ID',
+                    'variants': 'Variants',
+                    'print_areas': 'Print Areas',
+                    'print_areas.0.placeholders.0.images.0.id': 'Image ID'
+                  }[field] || field;
+                  return `  ${fieldDisplayName}: ${errorList.join(', ')}`;
                 })
                 .join('\n');
               errorMessage += '\n\nField errors:\n' + fieldErrors;
@@ -536,7 +546,10 @@ export class PrintifyAPI {
             errorMessage += '\n\nTo fix:\n1. Verify the ID exists (use list operations)\n2. Check you\'re using the correct shop\n3. Ensure the resource wasn\'t deleted';
           } else if (response.status === 400 || response.status === 422) {
             errorCode = PrintifyErrorCode.VALIDATION_ERROR;
-            errorMessage += '\n\nTo fix:\n1. Check all required fields are provided\n2. Verify data types (numbers vs strings)\n3. Use example values from tool descriptions';
+            // Don't append generic fix if we already have specific field errors
+            if (!errorMessage.includes('Field errors:')) {
+              errorMessage += '\n\nTo fix:\n1. Check all required fields are provided\n2. Verify data types (numbers vs strings)\n3. Use example values from tool descriptions';
+            }
           } else if (response.status >= 500) {
             errorCode = PrintifyErrorCode.SERVER_ERROR;
             errorMessage += '\n\nTo fix:\n1. Wait a few minutes and retry\n2. Check Printify status page\n3. Try a simpler request to test connectivity';
@@ -668,7 +681,17 @@ export class PrintifyAPI {
               const fieldErrors = Object.entries(errorJson.errors)
                 .map(([field, errors]: [string, any]) => {
                   const errorList = Array.isArray(errors) ? errors : [errors];
-                  return `  ${field}: ${errorList.join(', ')}`;
+                  // Map field names to user-friendly names
+                  const fieldDisplayName = {
+                    'title': 'Product Title',
+                    'description': 'Description',
+                    'blueprint_id': 'Blueprint ID',
+                    'print_provider_id': 'Print Provider ID',
+                    'variants': 'Variants',
+                    'print_areas': 'Print Areas',
+                    'print_areas.0.placeholders.0.images.0.id': 'Image ID'
+                  }[field] || field;
+                  return `  ${fieldDisplayName}: ${errorList.join(', ')}`;
                 })
                 .join('\n');
               errorMessage += '\n\nField errors:\n' + fieldErrors;
@@ -695,7 +718,10 @@ export class PrintifyAPI {
             errorMessage += '\n\nTo fix:\n1. Verify the ID exists (use list operations)\n2. Check you\'re using the correct shop\n3. Ensure the resource wasn\'t deleted';
           } else if (response.status === 400 || response.status === 422) {
             errorCode = PrintifyErrorCode.VALIDATION_ERROR;
-            errorMessage += '\n\nTo fix:\n1. Check all required fields are provided\n2. Verify data types (numbers vs strings)\n3. Use example values from tool descriptions';
+            // Don't append generic fix if we already have specific field errors
+            if (!errorMessage.includes('Field errors:')) {
+              errorMessage += '\n\nTo fix:\n1. Check all required fields are provided\n2. Verify data types (numbers vs strings)\n3. Use example values from tool descriptions';
+            }
           } else if (response.status >= 500) {
             errorCode = PrintifyErrorCode.SERVER_ERROR;
             errorMessage += '\n\nTo fix:\n1. Wait a few minutes and retry\n2. Check Printify status page\n3. Try a simpler request to test connectivity';
