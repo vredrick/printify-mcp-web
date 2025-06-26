@@ -90,6 +90,298 @@ interface CacheEntry<T> {
   timestamp: number;
 }
 
+// Response formatting utilities
+export class ResponseFormatter {
+  // Format blueprints list as a compact table
+  static formatBlueprintsList(blueprints: any[], options: { includeDescription?: boolean; maxItems?: number } = {}): string {
+    const { includeDescription = true, maxItems = 20 } = options;
+    const items = blueprints.slice(0, maxItems);
+    
+    if (items.length === 0) {
+      return "No blueprints found.";
+    }
+
+    let output = `Found ${blueprints.length} blueprints${maxItems < blueprints.length ? ` (showing first ${maxItems})` : ''}:\n\n`;
+    
+    // Create table header
+    output += includeDescription 
+      ? "┌─────────┬──────────────────────────────────┬─────────────────────────────────┐\n"
+      + "│   ID    │             Name                 │          Description            │\n"
+      + "├─────────┼──────────────────────────────────┼─────────────────────────────────┤\n"
+      : "┌─────────┬──────────────────────────────────────────────────────────────────┐\n"
+      + "│   ID    │                           Name                                   │\n"
+      + "├─────────┼──────────────────────────────────────────────────────────────────┤\n";
+
+    // Add blueprint rows
+    items.forEach(bp => {
+      const id = String(bp.id).padEnd(7);
+      const name = (bp.title || 'Unnamed').substring(0, 30).padEnd(30);
+      
+      if (includeDescription) {
+        const desc = (bp.description || bp.brand || '').substring(0, 29).padEnd(29);
+        output += `│ ${id} │ ${name} │ ${desc} │\n`;
+      } else {
+        const longName = (bp.title || 'Unnamed').substring(0, 62).padEnd(62);
+        output += `│ ${id} │ ${longName} │\n`;
+      }
+    });
+    
+    // Close table
+    output += includeDescription 
+      ? "└─────────┴──────────────────────────────────┴─────────────────────────────────┘\n"
+      : "└─────────┴──────────────────────────────────────────────────────────────────┘\n";
+
+    // Add usage guidance
+    output += "\n💡 Next Steps:\n";
+    output += "• Use get-blueprint {id} for detailed information about a specific blueprint\n";
+    output += "• Use get-popular-blueprints for commonly used products\n";
+    output += "• Use search-blueprints to filter by category (apparel/accessories/home)\n";
+    
+    if (maxItems < blueprints.length) {
+      output += `• Use pagination: get-blueprints page=2 to see more results\n`;
+    }
+
+    return output;
+  }
+
+  // Format blueprint details for single blueprint
+  static formatBlueprintDetails(blueprint: any): string {
+    const title = blueprint.title || 'Unnamed Blueprint';
+    const id = blueprint.id || 'Unknown';
+    const brand = blueprint.brand || 'Unknown';
+    const model = blueprint.model || 'N/A';
+    const description = blueprint.description || 'No description available';
+
+    let output = `📋 Blueprint Details\n`;
+    output += `═══════════════════\n\n`;
+    output += `🆔 ID: ${id}\n`;
+    output += `📝 Name: ${title}\n`;
+    output += `🏢 Brand: ${brand}\n`;
+    output += `🔧 Model: ${model}\n`;
+    output += `📄 Description: ${description}\n\n`;
+
+    output += `💡 Next Steps:\n`;
+    output += `• Use get-print-providers ${id} to see available print providers\n`;
+    output += `• Use validate-blueprint ${id} to check compatibility\n`;
+    output += `• Use this ID in create-product or create-product-simple\n`;
+
+    return output;
+  }
+
+  // Format print providers list
+  static formatPrintProviders(providers: any[], blueprintId: string): string {
+    if (!providers || providers.length === 0) {
+      return `❌ No print providers available for blueprint ${blueprintId}`;
+    }
+
+    let output = `🖨️ Print Providers for Blueprint ${blueprintId}\n`;
+    output += `══════════════════════════════════════════\n\n`;
+
+    providers.forEach((provider, index) => {
+      const isRecommended = index === 0; // First provider is usually recommended
+      output += `${isRecommended ? '⭐ ' : '• '}Provider ${provider.id}: ${provider.title || 'Unnamed'}\n`;
+      if (provider.location) output += `  📍 Location: ${provider.location}\n`;
+      output += `\n`;
+    });
+
+    output += `💡 Next Steps:\n`;
+    output += `• Use get-variants ${blueprintId} {provider_id} to see available variants\n`;
+    output += `• Provider ${providers[0]?.id} is typically recommended (shown with ⭐)\n`;
+
+    return output;
+  }
+
+  // Format variants in a compact way
+  static formatVariants(variants: any[], blueprintId: string, printProviderId: string): string {
+    if (!variants || variants.length === 0) {
+      return `❌ No variants available for blueprint ${blueprintId} with provider ${printProviderId}`;
+    }
+
+    let output = `👕 Available Variants\n`;
+    output += `Blueprint ${blueprintId} → Provider ${printProviderId}\n`;
+    output += `═══════════════════════════════════════\n\n`;
+
+    // Group variants by color for better readability
+    const variantsByColor = new Map<string, any[]>();
+    
+    variants.forEach(variant => {
+      const title = variant.title || 'Unknown';
+      // Extract color (everything before the first '/')
+      const colorMatch = title.match(/^([^\/]+)/);
+      const color = colorMatch ? colorMatch[1].trim() : 'Unknown Color';
+      
+      if (!variantsByColor.has(color)) {
+        variantsByColor.set(color, []);
+      }
+      variantsByColor.get(color)!.push(variant);
+    });
+
+    // Display grouped variants
+    for (const [color, colorVariants] of variantsByColor) {
+      output += `🎨 ${color}:\n`;
+      colorVariants.forEach(variant => {
+        const sizeMatch = variant.title.match(/\/\s*(.+)$/);
+        const size = sizeMatch ? sizeMatch[1].trim() : 'One Size';
+        const cost = variant.cost ? `$${(variant.cost / 100).toFixed(2)}` : 'N/A';
+        output += `  • ID ${variant.id}: ${size} (Base cost: ${cost})\n`;
+      });
+      output += `\n`;
+    }
+
+    output += `💡 Next Steps:\n`;
+    output += `• Use these variant IDs in create-product variants array\n`;
+    output += `• Use calculate-pricing to determine selling prices\n`;
+    output += `• Use validate-variants to check compatibility before creating product\n`;
+
+    return output;
+  }
+
+  // Format product creation success
+  static formatProductCreated(product: any, blueprint?: any): string {
+    let output = `✅ Product Created Successfully!\n`;
+    output += `═══════════════════════════════\n\n`;
+    output += `🆔 Product ID: ${product.id}\n`;
+    output += `📝 Title: ${product.title}\n`;
+    output += `📋 Blueprint: ${blueprint?.title || `ID ${product.blueprint_id}`}\n`;
+    output += `🏪 Shop: ${product.shop_id}\n`;
+    output += `👕 Variants: ${product.variants?.length || 0} enabled\n`;
+    output += `🖼️ Print Areas: ${product.print_areas?.length || 0} configured\n`;
+    output += `👁️ Visible: ${product.visible ? 'Yes' : 'No'}\n\n`;
+
+    output += `💡 Next Steps:\n`;
+    output += `• Use publish-product ${product.id} to make it available in your store\n`;
+    output += `• Use get-product ${product.id} to view current status\n`;
+    output += `• Use update-product ${product.id} to modify details if needed\n`;
+
+    return output;
+  }
+
+  // Format error messages with helpful context
+  static formatError(error: any, context?: string): string {
+    let output = `❌ Error${context ? ` ${context}` : ''}\n`;
+    output += `═══════════════════════\n\n`;
+    output += `🚨 ${error.message || 'An unknown error occurred'}\n\n`;
+
+    // Add specific troubleshooting based on error type
+    if (error.code === 'AUTH_FAILED') {
+      output += `🔧 Troubleshooting:\n`;
+      output += `• Check your Printify API key is valid\n`;
+      output += `• Ensure the key is active in your account\n`;
+      output += `• Try generating a new API key at printify.com\n`;
+    } else if (error.code === 'RATE_LIMIT') {
+      output += `🔧 Troubleshooting:\n`;
+      output += `• Wait 60 seconds before retrying\n`;
+      output += `• Reduce the number of requests\n`;
+      output += `• Use smaller page limits for list operations\n`;
+    } else if (error.code === 'NOT_FOUND') {
+      output += `🔧 Troubleshooting:\n`;
+      output += `• Verify the ID exists (use list operations to check)\n`;
+      output += `• Check you're using the correct shop\n`;
+      output += `• Ensure the resource wasn't deleted\n`;
+    } else if (error.code === 'VALIDATION_ERROR') {
+      output += `🔧 Troubleshooting:\n`;
+      output += `• Check all required fields are provided\n`;
+      output += `• Verify data types (numbers vs strings)\n`;
+      output += `• Use validation tools before creating products\n`;
+    }
+
+    return output;
+  }
+
+  // Response size management utilities
+  static checkResponseSize(data: any): { size: number; warning?: string; action?: string } {
+    const jsonString = JSON.stringify(data);
+    const sizeInBytes = Buffer.byteLength(jsonString, 'utf8');
+    const sizeInKB = Math.round(sizeInBytes / 1024);
+    
+    if (sizeInKB > 100) {
+      return {
+        size: sizeInKB,
+        warning: `⚠️ Large response detected (${sizeInKB}KB)`,
+        action: sizeInKB > 500 ? 'Use pagination or filtering to reduce response size' : 'Consider using pagination flags for better performance'
+      };
+    }
+    
+    return { size: sizeInKB };
+  }
+
+  static addResponseSizeWarning(response: string, data?: any): string {
+    if (data) {
+      const sizeCheck = this.checkResponseSize(data);
+      if (sizeCheck.warning) {
+        const warning = `\n${sizeCheck.warning}\n`;
+        const action = sizeCheck.action ? `💡 ${sizeCheck.action}\n` : '';
+        return response + warning + action;
+      }
+    }
+    return response;
+  }
+
+  static formatWithPagination<T>(
+    items: T[], 
+    currentPage: number = 1, 
+    pageSize: number = 20,
+    formatFunction: (items: T[]) => string,
+    totalItems?: number
+  ): string {
+    const total = totalItems || items.length;
+    const totalPages = Math.ceil(total / pageSize);
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, items.length);
+    const pageItems = items.slice(startIndex, endIndex);
+    
+    let output = formatFunction(pageItems);
+    
+    if (totalPages > 1) {
+      output += `\n📄 Pagination Info:\n`;
+      output += `• Page ${currentPage} of ${totalPages}\n`;
+      output += `• Showing items ${startIndex + 1}-${Math.min(endIndex, total)} of ${total}\n`;
+      
+      if (currentPage < totalPages) {
+        output += `• Use page=${currentPage + 1} for next page\n`;
+      }
+      if (currentPage > 1) {
+        output += `• Use page=${currentPage - 1} for previous page\n`;
+      }
+      
+      // Add quick navigation for large result sets
+      if (totalPages > 5) {
+        const suggestions = [];
+        if (currentPage !== 1) suggestions.push('page=1 (first)');
+        if (totalPages > 10 && currentPage < totalPages - 5) suggestions.push(`page=${Math.ceil(totalPages / 2)} (middle)`);
+        if (currentPage !== totalPages) suggestions.push(`page=${totalPages} (last)`);
+        
+        if (suggestions.length > 0) {
+          output += `• Quick navigation: ${suggestions.join(', ')}\n`;
+        }
+      }
+    }
+    
+    return output;
+  }
+
+  static truncateForPreview(text: string, maxLength: number = 1000): string {
+    if (text.length <= maxLength) {
+      return text;
+    }
+    
+    const truncated = text.slice(0, maxLength);
+    const lastNewline = truncated.lastIndexOf('\n');
+    const cutPoint = lastNewline > maxLength * 0.8 ? lastNewline : maxLength;
+    
+    return text.slice(0, cutPoint) + `\n\n... (truncated, ${text.length - cutPoint} more characters)\n💡 Use specific tools or pagination to get complete data`;
+  }
+
+  static getResponseSizeGuidance(): string {
+    return `\n📊 Response Size Management:\n` +
+      `• Large responses (>100KB) will show size warnings\n` +
+      `• Use page parameter for pagination: get-blueprints page=2\n` +
+      `• Use maxItems parameter to limit results: get-blueprints maxItems=10\n` +
+      `• Use specific filters to reduce data: search-blueprints category=apparel\n` +
+      `• Prefer targeted tools over broad listing operations\n`;
+  }
+}
+
 export class PrintifyAPI {
   private apiToken: string;
   public shopId: string | undefined;

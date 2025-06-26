@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { PrintifyAPI, PrintifyErrorCode } from './printify-api.js';
+import { PrintifyAPI, PrintifyErrorCode, ResponseFormatter } from './printify-api.js';
 import { ReplicateClient } from './replicate-client.js';
 import { z } from 'zod';
 import crypto from 'crypto';
@@ -196,17 +196,45 @@ function createUserMcpServer(session: UserSession) {
       })).optional().describe("Design placement on product with positioning")
     },
     async (params) => {
-      const product = await session.printifyClient.createProduct(params);
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(product, null, 2)
-        }]
-      };
+      try {
+        // Get blueprint for additional context in response
+        let blueprint;
+        try {
+          blueprint = await session.printifyClient.getBlueprint(params.blueprintId.toString());
+        } catch (error) {
+          // Don't fail if we can't get blueprint details
+        }
+        
+        const product = await session.printifyClient.createProduct(params);
+        const formattedResponse = ResponseFormatter.formatProductCreated(product, blueprint);
+        
+        return {
+          content: [{
+            type: "text",
+            text: formattedResponse
+          }]
+        };
+      } catch (error: any) {
+        const formattedError = ResponseFormatter.formatError(error, 'creating product');
+        
+        let troubleshootingGuidance = `\n🔧 Pre-creation Validation:\n`;
+        troubleshootingGuidance += `• Use validate-product-config to check all parameters before creation\n`;
+        troubleshootingGuidance += `• Use validate-blueprint ${params.blueprintId} to verify blueprint\n`;
+        troubleshootingGuidance += `• Use validate-variants ${params.blueprintId} ${params.printProviderId} to check variants\n`;
+        troubleshootingGuidance += `• Ensure images are uploaded successfully with upload-image\n`;
+        
+        return {
+          isError: true,
+          content: [{
+            type: "text",
+            text: formattedError + troubleshootingGuidance
+          }]
+        };
+      }
     }
   );
 
-  // Simplified product creation tool
+  // Simplified product creation tool with improved validation and error recovery
   server.tool(
     "create-product-simple",
     {
@@ -220,110 +248,126 @@ function createUserMcpServer(session: UserSession) {
     },
     async ({ title, description, blueprintId, imageId, profitMargin, includeColors, includeSizes }) => {
       try {
-        // Get blueprint details first
-        const blueprint = await session.printifyClient.getBlueprint(blueprintId.toString());
+        // STEP 1: Pre-validation
+        const validationErrors: string[] = [];
         
-        // Use first available print provider
-        const providers = await session.printifyClient.getPrintProviders(blueprintId.toString());
-        if (!providers || providers.length === 0) {
-          throw new Error('No print providers available for this blueprint');
+        if (!title || title.trim().length < 3) {
+          validationErrors.push("Title must be at least 3 characters long");
+        }
+        
+        if (!imageId || imageId.trim().length === 0) {
+          validationErrors.push("Image ID is required - use upload-image first");
+        }
+        
+        if (validationErrors.length > 0) {
+          throw new Error(`Validation failed:\n• ${validationErrors.join('\n• ')}`);
+        }
+        
+        // STEP 2: Validate blueprint with error recovery
+        let blueprint;
+        try {
+          blueprint = await session.printifyClient.getBlueprint(blueprintId.toString());
+          if (!blueprint) {
+            throw new Error(`Blueprint ${blueprintId} not found`);
+          }
+        } catch (error: any) {
+          throw new Error(`Blueprint validation failed: ${error.message}\n• Use get-popular-blueprints to find valid blueprint IDs`);
+        }
+        
+        // STEP 3: Get print providers with fallback
+        let providers;
+        try {
+          providers = await session.printifyClient.getPrintProviders(blueprintId.toString());
+          if (!providers || providers.length === 0) {
+            throw new Error(`No print providers available for blueprint ${blueprintId} (${blueprint.title})`);
+          }
+        } catch (error: any) {
+          throw new Error(`Print provider lookup failed: ${error.message}\n• This blueprint may not be available in your region`);
         }
         
         const printProviderId = providers[0].id;
         
-        // Get variants
-        const variantsData = await session.printifyClient.getVariants(
-          blueprintId.toString(), 
-          printProviderId.toString()
-        );
-        
-        // Parse requested colors and sizes
-        const requestedColors = includeColors.toLowerCase().split(',').map(c => c.trim());
-        const requestedSizes = includeSizes.toUpperCase().split(',').map(s => s.trim());
-        
-        // Filter and price variants
-        const allVariants = variantsData.variants || [];
-        
-        // Log available variants for debugging
-        if (process.env.PRINTIFY_DEBUG === 'true') {
-          console.log('Available variants:', allVariants.map((v: any) => v.title));
+        // STEP 4: Get and validate variants
+        let variantsData;
+        try {
+          variantsData = await session.printifyClient.getVariants(
+            blueprintId.toString(), 
+            printProviderId.toString()
+          );
+          if (!variantsData || !variantsData.variants || variantsData.variants.length === 0) {
+            throw new Error(`No variants available for blueprint ${blueprintId} with provider ${printProviderId}`);
+          }
+        } catch (error: any) {
+          throw new Error(`Variant lookup failed: ${error.message}\n• Try a different blueprint or check provider availability`);
         }
         
-        // Create fuzzy matching function
-        const fuzzyColorMatch = (variantTitle: string, requestedColor: string) => {
+        // STEP 5: Simple, reliable variant filtering
+        const requestedColors = includeColors.toLowerCase().split(',').map(c => c.trim()).filter(c => c.length > 0);
+        const requestedSizes = includeSizes.toUpperCase().split(',').map(s => s.trim()).filter(s => s.length > 0);
+        
+        const allVariants = variantsData.variants || [];
+        
+        // Simple exact matching - more reliable than fuzzy matching
+        const simpleColorMatch = (variantTitle: string, requestedColor: string) => {
           const titleLower = variantTitle.toLowerCase();
           const colorLower = requestedColor.toLowerCase();
-          
-          // Direct match
-          if (titleLower.includes(colorLower)) return true;
-          
-          // Common variations
-          const colorVariations: { [key: string]: string[] } = {
-            'white': ['white', 'solid white', 'wht'],
-            'black': ['black', 'solid black', 'blk'],
-            'gray': ['gray', 'grey', 'heather gray', 'heather grey'],
-            'red': ['red', 'solid red'],
-            'blue': ['blue', 'solid blue', 'navy', 'royal blue'],
-            'green': ['green', 'solid green', 'forest', 'olive'],
-            'yellow': ['yellow', 'gold'],
-            'pink': ['pink', 'rose'],
-            'purple': ['purple', 'violet'],
-            'orange': ['orange'],
-            'brown': ['brown', 'chocolate']
-          };
-          
-          // Check if requested color matches any variation
-          for (const [baseColor, variations] of Object.entries(colorVariations)) {
-            if (variations.includes(colorLower)) {
-              return variations.some(v => titleLower.includes(v));
-            }
-          }
-          
-          return false;
+          return titleLower.includes(colorLower);
         };
         
-        const variants = allVariants
-          .filter((v: any) => {
-            const title = v.title;
-            
-            // Check color match with fuzzy logic
-            const hasRequestedColor = requestedColors.length === 0 || 
-              requestedColors.some(color => fuzzyColorMatch(title, color));
-            
-            // Check size match (exact for sizes)
-            const hasRequestedSize = requestedSizes.length === 0 ||
-              requestedSizes.some(size => {
-                // Match size at word boundaries to avoid matching XL in 2XL
-                const sizeRegex = new RegExp(`\\b${size}\\b`);
-                return sizeRegex.test(title);
-              });
-            
-            return hasRequestedColor && hasRequestedSize;
-          })
-          .map((v: any) => {
-            const pricing = session.printifyClient.calculatePricing(v.cost, profitMargin);
-            return {
-              variantId: v.id,
-              price: pricing.price,
-              isEnabled: true
-            };
-          });
+        const simpleSizeMatch = (variantTitle: string, requestedSize: string) => {
+          // Match size with word boundaries to avoid XL matching 2XL
+          const sizeRegex = new RegExp(`\\b${requestedSize}\\b`, 'i');
+          return sizeRegex.test(variantTitle);
+        };
+        
+        // Filter variants with progressive fallback
+        let filteredVariants = allVariants.filter((v: any) => {
+          const title = v.title;
+          
+          const hasRequestedColor = requestedColors.length === 0 || 
+            requestedColors.some(color => simpleColorMatch(title, color));
+          
+          const hasRequestedSize = requestedSizes.length === 0 ||
+            requestedSizes.some(size => simpleSizeMatch(title, size));
+          
+          return hasRequestedColor && hasRequestedSize;
+        });
+        
+        // Fallback 1: If no exact matches, try colors only
+        if (filteredVariants.length === 0 && requestedColors.length > 0) {
+          filteredVariants = allVariants.filter((v: any) => 
+            requestedColors.some(color => simpleColorMatch(v.title, color))
+          );
+        }
+        
+        // Fallback 2: If still no matches, use first few variants
+        if (filteredVariants.length === 0) {
+          filteredVariants = allVariants.slice(0, Math.min(3, allVariants.length));
+        }
+        
+        const variants = filteredVariants.map((v: any) => {
+          const pricing = session.printifyClient.calculatePricing(v.cost, profitMargin);
+          return {
+            variantId: v.id,
+            price: pricing.price,
+            isEnabled: true
+          };
+        });
 
         if (variants.length === 0) {
-          // Provide more helpful error message
-          const sampleVariants = allVariants.slice(0, 5).map((v: any) => v.title).join(', ');
+          const availableVariants = allVariants.slice(0, 3).map((v: any) => v.title).join(', ');
           throw new Error(
-            `No variants match the requested filters.\n` +
-            `Requested: colors=[${requestedColors.join(', ')}], sizes=[${requestedSizes.join(', ')}]\n` +
-            `Available variants include: ${sampleVariants}${allVariants.length > 5 ? ', ...' : ''}\n` +
-            `Try adjusting your color/size filters or use the regular create-product tool for more control.`
+            `No variants could be created for this blueprint.\n` +
+            `Available variants: ${availableVariants}${allVariants.length > 3 ? ', ...' : ''}\n` +
+            `• Try using validate-variants tool first\n` +
+            `• Use create-product for more control over variant selection`
           );
         }
 
-        // Create product with simplified parameters
+        // STEP 6: Create product with error recovery
         const productData = {
-          title,
-          description,
+          title: title.trim(),
+          description: description.trim(),
           blueprintId,
           printProviderId,
           variants,
@@ -339,48 +383,51 @@ function createUserMcpServer(session: UserSession) {
           }
         };
 
-        const product = await session.printifyClient.createProduct(productData);
+        let product;
+        try {
+          product = await session.printifyClient.createProduct(productData);
+        } catch (error: any) {
+          throw new Error(`Product creation failed: ${error.message}\n• Check that image ID ${imageId} is valid\n• Verify blueprint ${blueprintId} supports your image dimensions`);
+        }
+        
+        // Format success response using ResponseFormatter
+        const formattedResponse = ResponseFormatter.formatProductCreated(product, blueprint);
         
         return {
           content: [{
             type: "text",
-            text: `Product created successfully!
-
-Title: ${product.title}
-ID: ${product.id}
-Blueprint: ${blueprint.title}
-Variants enabled: ${variants.length}
-Profit margin: ${profitMargin}
-
-Product details:
-${JSON.stringify(product, null, 2)}
-
-Next steps:
-- Use publish-product to make it available in your store
-- Use update-product to modify details
-- Use get-product to view current status`
+            text: formattedResponse + `\n\n📊 Creation Summary:\n` +
+              `• Blueprint: ${blueprint.title} (ID: ${blueprintId})\n` +
+              `• Variants: ${variants.length} enabled\n` +
+              `• Profit margin: ${profitMargin}\n` +
+              `• Filters applied: ${requestedColors.join(', ')} | ${requestedSizes.join(', ')}\n\n` +
+              `✅ Next Steps:\n` +
+              `• Use publish-product to make it available in your store\n` +
+              `• Use get-product ${product.id} to view current status\n` +
+              `• Use update-product to modify details if needed`
           }]
         };
       } catch (error: any) {
+        const formattedError = ResponseFormatter.formatError(error, 'creating product (simple mode)');
+        
+        let troubleshootingSteps = `\n🔧 Troubleshooting Steps:\n`;
+        troubleshootingSteps += `1. Validate blueprint: validate-blueprint ${blueprintId}\n`;
+        troubleshootingSteps += `2. Check image: ensure upload-image returned valid ID\n`;
+        troubleshootingSteps += `3. Test variants: validate-variants ${blueprintId}\n`;
+        troubleshootingSteps += `4. Try simpler filters: colors='white,black' sizes='M,L,XL'\n`;
+        troubleshootingSteps += `5. Use get-popular-blueprints for tested blueprint IDs\n`;
+        
+        let quickFixes = `\n🚀 Quick Fixes:\n`;
+        quickFixes += `• Common working blueprint IDs: 5 (t-shirt), 19 (mug), 77 (hoodie)\n`;
+        quickFixes += `• Reliable color options: white, black, gray, red, blue\n`;
+        quickFixes += `• Standard sizes: S, M, L, XL, 2XL\n`;
+        quickFixes += `• For complex needs, use create-product instead\n`;
+        
         return {
+          isError: true,
           content: [{
             type: "text",
-            text: `Error creating product: ${error.message}
-
-Common issues:
-- Invalid blueprint ID (use get-popular-blueprints for valid IDs)
-- Image not uploaded (use upload-image first)
-- No variants match colors/sizes (try 'white,black' and 'S,M,L,XL')
-
-Example usage:
-create-product-simple
-  title: "Cool T-Shirt"
-  description: "Amazing design"
-  blueprintId: 5
-  imageId: "your-image-id"
-  profitMargin: "50%"
-  includeColors: "white,black"
-  includeSizes: "M,L,XL"`
+            text: formattedError + troubleshootingSteps + quickFixes
           }]
         };
       }
@@ -479,50 +526,96 @@ create-product-simple
     "search-blueprints",
     {
       category: z.string().optional().describe("Category: 'apparel', 'accessories', or 'home'"),
-      type: z.string().optional().describe("Type: 'tshirt', 'hoodie', 'mug', 'totebag', 'poster', etc.")
+      type: z.string().optional().describe("Type: 'tshirt', 'hoodie', 'mug', 'totebag', 'poster', etc."),
+      limit: z.number().optional().default(15).describe("Maximum number of results (default: 15)")
     },
-    async ({ category, type }) => {
+    async ({ category, type, limit }) => {
       try {
         const blueprints = await session.printifyClient.searchBlueprints(category, type);
+        const data = blueprints.data || [];
         
-        // Create compact response to save tokens
-        const compactBlueprints = {
-          total: blueprints.total || 0,
-          items: (blueprints.data || []).map((bp: any) => ({
-            id: bp.id,
-            title: bp.title,
-            desc: bp.description || bp.brand || ''
-          }))
-        };
+        // Create search header with context
+        let searchHeader = '🔍 Blueprint Search Results\n';
+        searchHeader += '═══════════════════════════\n\n';
         
-        // Add helpful message based on search
-        let message = '';
         if (category && type) {
-          message = `Found ${compactBlueprints.total} ${type} products in ${category}:\n`;
+          searchHeader += `📂 Category: ${category} → ${type}\n`;
         } else if (category) {
-          message = `Found ${compactBlueprints.total} products in ${category}:\n`;
+          searchHeader += `📂 Category: ${category}\n`;
         } else if (type) {
-          message = `Found ${compactBlueprints.total} ${type} products:\n`;
+          searchHeader += `🔎 Type: ${type}\n`;
         } else {
-          message = `Found ${compactBlueprints.total} blueprints:\n`;
+          searchHeader += `🌟 All Blueprints\n`;
         }
         
-        // Format compact list
-        const itemList = compactBlueprints.items
-          .map((item: any) => `• ${item.title} (ID: ${item.id})${item.desc ? ` - ${item.desc}` : ''}`)
-          .join('\n');
+        searchHeader += `📊 Found: ${data.length} result${data.length !== 1 ? 's' : ''}\n\n`;
+        
+        // Handle empty results
+        if (data.length === 0) {
+          let suggestions = `💡 Try these alternatives:\n`;
+          suggestions += `• Use get-popular-blueprints for commonly used products\n`;
+          suggestions += `• Try broader categories: 'apparel', 'accessories', 'home'\n`;
+          suggestions += `• Search for types: 'tshirt', 'hoodie', 'mug', 'poster', 'sticker'\n`;
+          suggestions += `• Use get-blueprints to browse all available options\n`;
+          
+          return {
+            content: [{
+              type: "text",
+              text: searchHeader + suggestions
+            }]
+          };
+        }
+        
+        // Format results with pagination support
+        const formattedResults = ResponseFormatter.formatBlueprintsList(
+          data.slice(0, limit), 
+          { includeDescription: true, maxItems: limit }
+        );
+        
+        // Add response size warning if needed
+        const responseWithWarning = ResponseFormatter.addResponseSizeWarning(formattedResults, data);
+        
+        // Add search-specific guidance
+        let searchGuidance = `\n🎯 Refine Your Search:\n`;
+        if (!category) searchGuidance += `• Add category filter: search-blueprints category='apparel'\n`;
+        if (!type) searchGuidance += `• Add type filter: search-blueprints type='tshirt'\n`;
+        if (data.length > limit) searchGuidance += `• Showing ${limit} of ${data.length} results. Reduce limit for faster loading.\n`;
+        
+        // Add size management guidance for large result sets
+        let sizeGuidance = '';
+        if (data.length > 30) {
+          sizeGuidance = `\n📊 Large Result Set Detected:\n`;
+          sizeGuidance += `• Consider using more specific filters to reduce results\n`;
+          sizeGuidance += `• Use get-popular-blueprints for commonly used items\n`;
+          sizeGuidance += `• Try smaller limit values for faster responses\n`;
+        }
+        
+        // Add fallback information if relevant
+        let fallbackInfo = '';
+        if (blueprints._fallback) {
+          fallbackInfo = `\n⚠️ Note: Using cached data. ${blueprints._message}\n`;
+        }
         
         return {
           content: [{
             type: "text",
-            text: `${message}\n${itemList}\n\nUse get-blueprint with an ID for full details.`
+            text: searchHeader + responseWithWarning + searchGuidance + sizeGuidance + fallbackInfo
           }]
         };
       } catch (error: any) {
+        const formattedError = ResponseFormatter.formatError(error, 'searching blueprints');
+        
+        let searchHelp = `\n🔍 Search Tips:\n`;
+        searchHelp += `• Valid categories: 'apparel', 'accessories', 'home'\n`;
+        searchHelp += `• Popular types: 'tshirt', 'hoodie', 'mug', 'totebag', 'poster', 'sticker'\n`;
+        searchHelp += `• Use get-popular-blueprints for quick access to common products\n`;
+        searchHelp += `• Try get-blueprints limit=5 for general browsing\n`;
+        
         return {
+          isError: true,
           content: [{
             type: "text",
-            text: `Error searching blueprints: ${error.message}\n\nTry:\n- Using a valid category: 'apparel', 'accessories', or 'home'\n- Using a valid type: 'tshirt', 'hoodie', 'mug', etc.\n- Calling get-popular-blueprints for quick access to common products`
+            text: formattedError + searchHelp
           }]
         };
       }
@@ -532,27 +625,103 @@ create-product-simple
   // Get popular blueprints tool
   server.tool(
     "get-popular-blueprints",
-    {},
-    async () => {
+    {
+      category: z.string().optional().describe("Filter by category: 'apparel', 'accessories', or 'home' (optional)")
+    },
+    async ({ category }) => {
       try {
         const blueprints = await session.printifyClient.getPopularBlueprints();
+        let data = blueprints.data || [];
         
-        // Create compact response
-        const popularList = (blueprints.data || [])
-          .map((bp: any) => `• ${bp.title} (ID: ${bp.id})${bp.description ? ` - ${bp.description}` : ''}`)
-          .join('\n');
+        // Filter by category if specified
+        if (category) {
+          const categoryMap: {[key: string]: string[]} = {
+            'apparel': ['t-shirt', 'tshirt', 'shirt', 'hoodie', 'tank', 'long sleeve'],
+            'accessories': ['mug', 'bag', 'tote', 'sticker', 'phone case'],
+            'home': ['poster', 'canvas', 'print', 'wall art', 'blanket', 'pillow']
+          };
+          
+          const categoryTerms = categoryMap[category.toLowerCase()] || [];
+          if (categoryTerms.length > 0) {
+            data = data.filter((bp: any) => {
+              const title = (bp.title || '').toLowerCase();
+              return categoryTerms.some(term => title.includes(term));
+            });
+          }
+        }
+        
+        // Create header
+        let header = '⭐ Popular Blueprints\n';
+        header += '═══════════════════\n\n';
+        
+        if (category) {
+          header += `📂 Category: ${category}\n`;
+          header += `📊 Found: ${data.length} popular ${category} product${data.length !== 1 ? 's' : ''}\n\n`;
+        } else {
+          header += `🚀 Most commonly used blueprints for quick product creation\n`;
+          header += `📊 Total: ${data.length} blueprints\n\n`;
+        }
+        
+        // Handle empty results
+        if (data.length === 0) {
+          let suggestions = `💡 No popular blueprints found`;
+          if (category) {
+            suggestions += ` in ${category} category`;
+          }
+          suggestions += `\n\nTry:\n`;
+          suggestions += `• Remove category filter: get-popular-blueprints\n`;
+          suggestions += `• Search by type: search-blueprints type='tshirt'\n`;
+          suggestions += `• Browse all: get-blueprints limit=10\n`;
+          
+          return {
+            content: [{
+              type: "text",
+              text: header + suggestions
+            }]
+          };
+        }
+        
+        // Format using the blueprint formatter
+        const formattedResults = ResponseFormatter.formatBlueprintsList(
+          data,
+          { includeDescription: true, maxItems: data.length }
+        );
+        
+        // Add usage guidance specific to popular blueprints
+        let usageGuidance = `\n🎯 Quick Start Guide:\n`;
+        usageGuidance += `• These are the most reliable and commonly used blueprints\n`;
+        usageGuidance += `• Use with create-product-simple for fastest product creation\n`;
+        usageGuidance += `• All have good print provider availability and variant options\n`;
+        
+        if (!category) {
+          usageGuidance += `• Filter by category: get-popular-blueprints category='apparel'\n`;
+        }
+        
+        // Add fallback information if relevant
+        let fallbackInfo = '';
+        if (blueprints._fallback) {
+          fallbackInfo = `\n⚠️ Note: Using cached data. ${blueprints._message}\n`;
+        }
         
         return {
           content: [{
             type: "text",
-            text: `Popular blueprints for quick product creation:\n\n${popularList}\n\nUse these IDs with create-product or create-product-simple.`
+            text: header + formattedResults + usageGuidance + fallbackInfo
           }]
         };
       } catch (error: any) {
+        const formattedError = ResponseFormatter.formatError(error, 'retrieving popular blueprints');
+        
+        let quickHelp = `\n🚀 Alternative Options:\n`;
+        quickHelp += `• Try get-blueprints limit=5 for general browsing\n`;
+        quickHelp += `• Use search-blueprints category='apparel' for specific categories\n`;
+        quickHelp += `• Check your internet connection and API key\n`;
+        
         return {
+          isError: true,
           content: [{
             type: "text",
-            text: `Error getting popular blueprints: ${error.message}`
+            text: formattedError + quickHelp
           }]
         };
       }
@@ -790,39 +959,69 @@ ${isValid ? 'This product data should work with create-product.' : 'Fix the issu
     "get-blueprints",
     {
       page: z.number().optional().default(1).describe("Page number (default: 1)"),
-      limit: z.number().optional().default(5).describe("Number of blueprints per page (default: 5, max: 10, use 3 for better reliability)")
+      limit: z.number().optional().default(10).describe("Number of blueprints per page (default: 10, recommended: 5-15)"),
+      compact: z.boolean().optional().default(false).describe("Show compact view without descriptions (default: false)")
     },
-    async ({ page, limit }) => {
+    async ({ page, limit, compact }) => {
       try {
         const blueprints = await session.printifyClient.getBlueprints(page, limit);
         
-        // Add helpful message if using fallback data
+        // Handle fallback data with formatted response
         if (blueprints._fallback) {
+          const fallbackMessage = `⚠️ Using cached blueprint data\n${blueprints._message}\n\n`;
+          const formattedList = ResponseFormatter.formatBlueprintsList(
+            blueprints.data || [], 
+            { includeDescription: !compact, maxItems: limit }
+          );
+          
           return {
             content: [{
               type: "text",
-              text: `${blueprints._message}\n\n${JSON.stringify(blueprints, null, 2)}`
+              text: fallbackMessage + formattedList
             }]
           };
+        }
+        
+        // Format live API data with pagination
+        const formattedResponse = ResponseFormatter.formatWithPagination(
+          blueprints.data || [],
+          page,
+          limit,
+          (items) => ResponseFormatter.formatBlueprintsList(items, { includeDescription: !compact, maxItems: limit }),
+          blueprints.total
+        );
+        
+        // Add response size warning if needed
+        const responseWithWarning = ResponseFormatter.addResponseSizeWarning(formattedResponse, blueprints);
+        
+        // Add size management guidance for large responses
+        let sizeGuidance = '';
+        if (blueprints.data && blueprints.data.length >= 20) {
+          sizeGuidance = ResponseFormatter.getResponseSizeGuidance();
         }
         
         return {
           content: [{
             type: "text",
-            text: JSON.stringify(blueprints, null, 2)
+            text: responseWithWarning + sizeGuidance
           }]
         };
       } catch (error: any) {
-        // Provide helpful error message
+        // Format error response
+        const formattedError = ResponseFormatter.formatError(error, 'retrieving blueprints');
+        
+        // Add specific guidance for common issues
+        let additionalGuidance = '';
         if (error.code === PrintifyErrorCode.TIMEOUT) {
-          return {
-            content: [{
-              type: "text",
-              text: `Error: Request timed out. The blueprints catalog is large and may take time to load.\n\nTry:\n1. Using a smaller limit (e.g., limit=3)\n2. Checking your internet connection\n3. Enabling debug mode with PRINTIFY_DEBUG=true\n\nError details: ${error.message}`
-            }]
-          };
+          additionalGuidance = `\n🔄 Quick Solutions:\n• Try get-blueprints limit=5 for faster loading\n• Use get-popular-blueprints for commonly used items\n• Enable debug mode: PRINTIFY_DEBUG=true\n`;
         }
-        throw error;
+        
+        return {
+          content: [{
+            type: "text",
+            text: formattedError + additionalGuidance
+          }]
+        };
       }
     }
   );
@@ -834,13 +1033,27 @@ ${isValid ? 'This product data should work with create-product.' : 'Fix the issu
       blueprintId: z.string().describe("Blueprint ID")
     },
     async ({ blueprintId }) => {
-      const blueprint = await session.printifyClient.getBlueprint(blueprintId);
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(blueprint, null, 2)
-        }]
-      };
+      try {
+        const blueprint = await session.printifyClient.getBlueprint(blueprintId);
+        const formattedResponse = ResponseFormatter.formatBlueprintDetails(blueprint);
+        
+        return {
+          content: [{
+            type: "text",
+            text: formattedResponse
+          }]
+        };
+      } catch (error: any) {
+        const formattedError = ResponseFormatter.formatError(error, `retrieving blueprint ${blueprintId}`);
+        
+        return {
+          isError: true,
+          content: [{
+            type: "text",
+            text: formattedError
+          }]
+        };
+      }
     }
   );
 
@@ -851,13 +1064,27 @@ ${isValid ? 'This product data should work with create-product.' : 'Fix the issu
       blueprintId: z.string().describe("Blueprint ID")
     },
     async ({ blueprintId }) => {
-      const providers = await session.printifyClient.getPrintProviders(blueprintId);
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(providers, null, 2)
-        }]
-      };
+      try {
+        const providers = await session.printifyClient.getPrintProviders(blueprintId);
+        const formattedResponse = ResponseFormatter.formatPrintProviders(providers, blueprintId);
+        
+        return {
+          content: [{
+            type: "text",
+            text: formattedResponse
+          }]
+        };
+      } catch (error: any) {
+        const formattedError = ResponseFormatter.formatError(error, `retrieving print providers for blueprint ${blueprintId}`);
+        
+        return {
+          isError: true,
+          content: [{
+            type: "text",
+            text: formattedError
+          }]
+        };
+      }
     }
   );
 
@@ -869,13 +1096,389 @@ ${isValid ? 'This product data should work with create-product.' : 'Fix the issu
       printProviderId: z.string().describe("Print provider ID")
     },
     async ({ blueprintId, printProviderId }) => {
-      const variants = await session.printifyClient.getVariants(blueprintId, printProviderId);
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(variants, null, 2)
-        }]
-      };
+      try {
+        const variantsData = await session.printifyClient.getVariants(blueprintId, printProviderId);
+        const variants = variantsData.variants || [];
+        const formattedResponse = ResponseFormatter.formatVariants(variants, blueprintId, printProviderId);
+        
+        return {
+          content: [{
+            type: "text",
+            text: formattedResponse
+          }]
+        };
+      } catch (error: any) {
+        const formattedError = ResponseFormatter.formatError(error, `retrieving variants for blueprint ${blueprintId}, provider ${printProviderId}`);
+        
+        return {
+          isError: true,
+          content: [{
+            type: "text",
+            text: formattedError
+          }]
+        };
+      }
+    }
+  );
+
+  // ===== VALIDATION TOOLS =====
+
+  // Validate blueprint tool
+  server.tool(
+    "validate-blueprint",
+    {
+      blueprintId: z.string().describe("Blueprint ID to validate")
+    },
+    async ({ blueprintId }) => {
+      try {
+        // Get blueprint details
+        const blueprint = await session.printifyClient.getBlueprint(blueprintId);
+        
+        // Get print providers for this blueprint
+        const providers = await session.printifyClient.getPrintProviders(blueprintId);
+        
+        let output = `✅ Blueprint Validation: ${blueprintId}\n`;
+        output += `═══════════════════════════════════\n\n`;
+        output += `📋 Name: ${blueprint.title || 'Unknown'}\n`;
+        output += `🏢 Brand: ${blueprint.brand || 'Unknown'}\n`;
+        output += `🆔 ID: ${blueprint.id}\n`;
+        output += `📄 Description: ${blueprint.description || 'No description'}\n\n`;
+        
+        output += `🖨️ Print Providers Available: ${providers?.length || 0}\n`;
+        if (providers && providers.length > 0) {
+          output += `   ⭐ Recommended: ${providers[0].title} (ID: ${providers[0].id})\n`;
+          if (providers.length > 1) {
+            output += `   📋 Alternatives: ${providers.slice(1).map((p: any) => `${p.title} (${p.id})`).join(', ')}\n`;
+          }
+        } else {
+          output += `   ❌ No print providers available\n`;
+        }
+        
+        output += `\n💡 Next Steps:\n`;
+        if (providers && providers.length > 0) {
+          output += `• Use validate-variants ${blueprintId} ${providers[0].id} to check available variants\n`;
+          output += `• Use get-variants ${blueprintId} ${providers[0].id} to see all options\n`;
+          output += `• This blueprint is ready for product creation\n`;
+        } else {
+          output += `• ❌ Cannot create products - no print providers available\n`;
+          output += `• Try a different blueprint ID from get-popular-blueprints\n`;
+        }
+        
+        return {
+          content: [{
+            type: "text",
+            text: output
+          }]
+        };
+      } catch (error: any) {
+        const formattedError = ResponseFormatter.formatError(error, `validating blueprint ${blueprintId}`);
+        
+        let validationHelp = `\n🔍 Validation Tips:\n`;
+        validationHelp += `• Ensure blueprint ID is correct (use get-popular-blueprints)\n`;
+        validationHelp += `• Try get-blueprints to browse available options\n`;
+        validationHelp += `• Check if the blueprint exists with get-blueprint ${blueprintId}\n`;
+        
+        return {
+          isError: true,
+          content: [{
+            type: "text",
+            text: formattedError + validationHelp
+          }]
+        };
+      }
+    }
+  );
+
+  // Validate variants tool
+  server.tool(
+    "validate-variants",
+    {
+      blueprintId: z.string().describe("Blueprint ID"),
+      printProviderId: z.string().describe("Print provider ID"),
+      colors: z.string().optional().describe("Comma-separated colors to check (e.g., 'white,black')"),
+      sizes: z.string().optional().describe("Comma-separated sizes to check (e.g., 'M,L,XL')")
+    },
+    async ({ blueprintId, printProviderId, colors, sizes }) => {
+      try {
+        // Get variants data
+        const variantsData = await session.printifyClient.getVariants(blueprintId, printProviderId);
+        const allVariants = variantsData.variants || [];
+        
+        let output = `✅ Variant Validation\n`;
+        output += `═══════════════════\n\n`;
+        output += `📋 Blueprint: ${blueprintId}\n`;
+        output += `🖨️ Provider: ${printProviderId}\n`;
+        output += `👕 Total variants available: ${allVariants.length}\n\n`;
+        
+        // If no filters specified, show summary
+        if (!colors && !sizes) {
+          // Group by color for summary
+          const colorGroups = new Map<string, any[]>();
+          allVariants.forEach((variant: any) => {
+            const colorMatch = variant.title.match(/^([^\/]+)/);
+            const color = colorMatch ? colorMatch[1].trim() : 'Unknown';
+            if (!colorGroups.has(color)) colorGroups.set(color, []);
+            colorGroups.get(color)!.push(variant);
+          });
+          
+          output += `🎨 Available Colors (${colorGroups.size}):\n`;
+          for (const [color, variants] of colorGroups) {
+            const sampleSizes = variants.slice(0, 3).map((v: any) => {
+              const sizeMatch = v.title.match(/\/\s*(.+)$/);
+              return sizeMatch ? sizeMatch[1].trim() : 'One Size';
+            });
+            output += `  • ${color}: ${sampleSizes.join(', ')}${variants.length > 3 ? ' ...' : ''}\n`;
+          }
+          
+          output += `\n💡 To validate specific options:\n`;
+          output += `• validate-variants ${blueprintId} ${printProviderId} colors='white,black'\n`;
+          output += `• validate-variants ${blueprintId} ${printProviderId} sizes='M,L,XL'\n`;
+          output += `• validate-variants ${blueprintId} ${printProviderId} colors='white' sizes='M,L,XL'\n`;
+          
+          return {
+            content: [{
+              type: "text",
+              text: output
+            }]
+          };
+        }
+        
+        // Filter variants based on specified colors and sizes
+        const requestedColors = colors ? colors.toLowerCase().split(',').map(c => c.trim()) : [];
+        const requestedSizes = sizes ? sizes.toUpperCase().split(',').map(s => s.trim()) : [];
+        
+        const matchingVariants = allVariants.filter((variant: any) => {
+          const title = variant.title;
+          
+          // Check color match
+          let colorMatch = true;
+          if (requestedColors.length > 0) {
+            colorMatch = requestedColors.some(color => 
+              title.toLowerCase().includes(color.toLowerCase())
+            );
+          }
+          
+          // Check size match
+          let sizeMatch = true;
+          if (requestedSizes.length > 0) {
+            sizeMatch = requestedSizes.some(size => {
+              const sizeRegex = new RegExp(`\\b${size}\\b`, 'i');
+              return sizeRegex.test(title);
+            });
+          }
+          
+          return colorMatch && sizeMatch;
+        });
+        
+        // Report validation results
+        if (requestedColors.length > 0) {
+          output += `🎨 Requested Colors: ${requestedColors.join(', ')}\n`;
+        }
+        if (requestedSizes.length > 0) {
+          output += `📏 Requested Sizes: ${requestedSizes.join(', ')}\n`;
+        }
+        
+        output += `\n🔍 Validation Results:\n`;
+        output += `• Found ${matchingVariants.length} matching variants\n`;
+        
+        if (matchingVariants.length === 0) {
+          output += `❌ No variants match your criteria\n\n`;
+          output += `💡 Suggestions:\n`;
+          
+          // Analyze what's available
+          const availableColors = [...new Set(allVariants.map((v: any) => {
+            const match = v.title.match(/^([^\/]+)/);
+            return match ? match[1].trim().toLowerCase() : '';
+          }))].filter(c => c);
+          
+          const availableSizes = [...new Set(allVariants.map((v: any) => {
+            const match = v.title.match(/\/\s*(.+)$/);
+            return match ? match[1].trim().toUpperCase() : '';
+          }))].filter(s => s);
+          
+          if (requestedColors.length > 0) {
+            output += `• Available colors: ${availableColors.slice(0, 5).join(', ')}\n`;
+          }
+          if (requestedSizes.length > 0) {
+            output += `• Available sizes: ${availableSizes.slice(0, 8).join(', ')}\n`;
+          }
+          
+          output += `• Use get-variants ${blueprintId} ${printProviderId} to see all options\n`;
+        } else {
+          output += `✅ Valid combination found\n\n`;
+          
+          // Show sample matching variants
+          const sampleVariants = matchingVariants.slice(0, 5);
+          output += `📋 Sample matching variants:\n`;
+          sampleVariants.forEach((variant: any) => {
+            const cost = variant.cost ? `$${(variant.cost / 100).toFixed(2)}` : 'N/A';
+            output += `  • ID ${variant.id}: ${variant.title} (${cost})\n`;
+          });
+          
+          if (matchingVariants.length > 5) {
+            output += `  ... and ${matchingVariants.length - 5} more\n`;
+          }
+          
+          output += `\n💡 Ready for product creation:\n`;
+          output += `• These variant IDs can be used in create-product\n`;
+          output += `• Use calculate-pricing to determine selling prices\n`;
+          output += `• All variants are compatible with this blueprint and provider\n`;
+        }
+        
+        return {
+          content: [{
+            type: "text",
+            text: output
+          }]
+        };
+      } catch (error: any) {
+        const formattedError = ResponseFormatter.formatError(error, `validating variants for blueprint ${blueprintId}, provider ${printProviderId}`);
+        
+        let validationHelp = `\n🔍 Validation Tips:\n`;
+        validationHelp += `• Verify blueprint and provider IDs with validate-blueprint ${blueprintId}\n`;
+        validationHelp += `• Check available providers with get-print-providers ${blueprintId}\n`;
+        validationHelp += `• Use get-variants ${blueprintId} ${printProviderId} to see all options\n`;
+        
+        return {
+          isError: true,
+          content: [{
+            type: "text",
+            text: formattedError + validationHelp
+          }]
+        };
+      }
+    }
+  );
+
+  // Validate product configuration tool
+  server.tool(
+    "validate-product-config",
+    {
+      blueprintId: z.string().describe("Blueprint ID"),
+      printProviderId: z.string().describe("Print provider ID"), 
+      variantIds: z.array(z.number()).describe("Array of variant IDs to validate"),
+      imageId: z.string().optional().describe("Image ID to validate (optional)")
+    },
+    async ({ blueprintId, printProviderId, variantIds, imageId }) => {
+      try {
+        let output = `🔍 Product Configuration Validation\n`;
+        output += `═══════════════════════════════════\n\n`;
+        
+        let isValid = true;
+        const issues: string[] = [];
+        const warnings: string[] = [];
+        
+        // Validate blueprint and provider
+        try {
+          await session.printifyClient.getBlueprint(blueprintId);
+          output += `✅ Blueprint ${blueprintId}: Valid\n`;
+        } catch (error) {
+          output += `❌ Blueprint ${blueprintId}: Invalid\n`;
+          issues.push(`Blueprint ${blueprintId} not found`);
+          isValid = false;
+        }
+        
+        // Validate print provider
+        try {
+          const providers = await session.printifyClient.getPrintProviders(blueprintId);
+          const validProvider = providers.find((p: any) => p.id.toString() === printProviderId);
+          if (validProvider) {
+            output += `✅ Print Provider ${printProviderId}: Valid\n`;
+          } else {
+            output += `❌ Print Provider ${printProviderId}: Invalid for this blueprint\n`;
+            issues.push(`Print provider ${printProviderId} not available for blueprint ${blueprintId}`);
+            isValid = false;
+          }
+        } catch (error) {
+          output += `❌ Print Provider ${printProviderId}: Could not validate\n`;
+          issues.push(`Could not validate print provider ${printProviderId}`);
+          isValid = false;
+        }
+        
+        // Validate variants
+        if (isValid) {
+          try {
+            const variantsData = await session.printifyClient.getVariants(blueprintId, printProviderId);
+            const availableVariants = variantsData.variants || [];
+            const availableIds = availableVariants.map((v: any) => v.id);
+            
+            const invalidVariants = variantIds.filter(id => !availableIds.includes(id));
+            const validVariants = variantIds.filter(id => availableIds.includes(id));
+            
+            output += `✅ Variants: ${validVariants.length}/${variantIds.length} valid\n`;
+            
+            if (invalidVariants.length > 0) {
+              output += `❌ Invalid variant IDs: ${invalidVariants.join(', ')}\n`;
+              issues.push(`Invalid variant IDs: ${invalidVariants.join(', ')}`);
+              isValid = false;
+            }
+            
+            if (validVariants.length === 0) {
+              issues.push('No valid variants specified');
+              isValid = false;
+            } else if (validVariants.length < 3) {
+              warnings.push(`Only ${validVariants.length} variant(s) selected - consider adding more size/color options`);
+            }
+          } catch (error) {
+            output += `❌ Variants: Could not validate\n`;
+            issues.push('Could not validate variants');
+            isValid = false;
+          }
+        }
+        
+        // Validate image if provided
+        if (imageId) {
+          // For now, we'll assume valid since there's no direct image validation API
+          output += `ℹ️ Image ${imageId}: Assumed valid (cannot verify)\n`;
+          warnings.push('Image validation not available - ensure image was uploaded successfully');
+        }
+        
+        output += `\n📊 Overall Status: ${isValid ? '✅ VALID' : '❌ INVALID'}\n\n`;
+        
+        // Show issues
+        if (issues.length > 0) {
+          output += `🚨 Issues to fix:\n`;
+          issues.forEach(issue => output += `  • ${issue}\n`);
+          output += `\n`;
+        }
+        
+        // Show warnings
+        if (warnings.length > 0) {
+          output += `⚠️ Warnings:\n`;
+          warnings.forEach(warning => output += `  • ${warning}\n`);
+          output += `\n`;
+        }
+        
+        // Provide next steps
+        output += `💡 Next Steps:\n`;
+        if (isValid) {
+          output += `• Configuration is valid - ready for product creation\n`;
+          output += `• Use create-product with these exact parameters\n`;
+          output += `• Consider testing with create-product-simple first\n`;
+        } else {
+          output += `• Fix the issues listed above before creating product\n`;
+          output += `• Use validate-blueprint ${blueprintId} for blueprint details\n`;
+          output += `• Use get-print-providers ${blueprintId} for valid providers\n`;
+          output += `• Use get-variants ${blueprintId} {provider_id} for valid variants\n`;
+        }
+        
+        return {
+          content: [{
+            type: "text",
+            text: output
+          }]
+        };
+      } catch (error: any) {
+        const formattedError = ResponseFormatter.formatError(error, 'validating product configuration');
+        
+        return {
+          isError: true,
+          content: [{
+            type: "text",
+            text: formattedError
+          }]
+        };
+      }
     }
   );
 

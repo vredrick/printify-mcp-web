@@ -17,8 +17,12 @@ A web-accessible Model Context Protocol (MCP) server for Printify's print-on-dem
 1. Fork this repository
 2. Sign up at [Railway.app](https://railway.app)
 3. Create a new project from your GitHub repo
-4. Railway will automatically detect and set the BASE_URL
-5. Deploy! (No manual environment variables needed)
+4. Set environment variables:
+   ```
+   PORT=3000
+  BASE_URL=https://your-app.railway.app
+   ```
+5. Deploy!
 
 ### Local Development
 
@@ -29,10 +33,6 @@ cd printify-mcp-web
 
 # Install dependencies
 npm install
-
-# Set environment variables (optional)
-export BASE_URL=http://localhost:3000
-export PORT=3000
 
 # Run in development mode
 npm run dev
@@ -86,86 +86,8 @@ docker run -p 3000:3000 -e PORT=3000 -e BASE_URL=http://localhost:3000 printify-
 - `get-print-providers` - Get print providers for a blueprint
 - `get-variants` - Get variants (sizes, colors) for a product
 
-## Available Prompts
+## Example Workflow
 
-### 🎨 create-product-wizard
-Interactive wizard to guide you through creating a product with best practices
-- Parameters: productType, designDescription, targetAudience, priceRange
-- Helps with blueprint selection, pricing, and design preparation
-
-### 📦 bulk-product-generator  
-Generate multiple product variants from a single design
-- Parameters: designId, productTypes (comma-separated), basePrice (dollars), namePattern
-- Efficiently creates multiple products with consistent settings
-
-### 🖼️ design-upload-assistant
-Help prepare and upload designs with optimal settings
-- Parameters: designType, intendedProducts (comma-separated), hasTransparency (yes/no), currentFormat
-- Ensures designs meet technical requirements
-
-### ✍️ product-description-writer
-Generate SEO-optimized product descriptions
-- Parameters: productName, targetKeywords (comma-separated), tone, features (comma-separated), idealCustomer
-- Creates compelling titles, descriptions, and tags
-
-## Available Resources
-
-### 📋 design-guidelines
-`printify://guidelines/design-requirements`
-- Comprehensive design requirements for all products
-- DPI, dimensions, safe zones, and file format specifications
-
-### 📏 size-charts
-`printify://reference/size-charts`
-- Standard size measurements for apparel products
-- Includes unisex, women's, and various product types
-
-### 💰 pricing-calculator
-`printify://tools/pricing-guide`
-- Pricing strategies (keystone, competitive, premium)
-- Profit margin calculations and tips
-
-### 📚 blueprint-catalog
-`printify://catalog/popular-blueprints`
-- Popular products organized by category
-- Includes pricing ranges and provider recommendations
-
-### 🚀 api-best-practices
-`printify://guides/api-best-practices`
-- Rate limits, error handling, and optimization tips
-- Image upload best practices and webhook information
-
-## Example Workflows
-
-### Using Prompts
-```javascript
-// Use the product creation wizard
-create-product-wizard({
-  productType: "t-shirt",
-  designDescription: "minimalist mountain landscape",
-  targetAudience: "outdoor enthusiasts",
-  priceRange: "mid-range"
-})
-
-// Generate multiple products from one design
-bulk-product-generator({
-  designId: "65ae7f0c116b930e23489128",
-  productTypes: "t-shirt, hoodie, mug",
-  basePrice: "19.99",
-  namePattern: "Mountain Adventure - {type}"
-})
-
-// Generate SEO-optimized descriptions
-product-description-writer({
-  productName: "Mountain Adventure Tee",
-  targetKeywords: "mountain, hiking, outdoor, adventure",
-  tone: "casual",
-  features: "soft cotton, eco-friendly, unisex fit",
-  idealCustomer: "hikers and nature lovers"
-})
-```
-
-### Traditional Tool Usage
 ```javascript
 // 1. Get blueprints
 get-blueprints()
@@ -202,13 +124,11 @@ create-product({
 
 ## Environment Variables
 
-| Variable | Description | Required | Default |
-|----------|-------------|----------|----------|
-| `PORT` | Server port | No | 3000 |
-| `BASE_URL` | Your deployed server URL | No | Auto-detected on Railway |
-| `NODE_ENV` | Environment (development/production) | No | development |
-
-**Note**: Railway automatically provides `RAILWAY_PUBLIC_DOMAIN` which the server uses to construct the BASE_URL.
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `PORT` | Server port (default: 3000) | No |
+| `BASE_URL` | Your deployed server URL | Yes (production) |
+| `NODE_ENV` | Environment (development/production) | No |
 
 ## Security
 
@@ -216,62 +136,6 @@ create-product({
 - Each user gets a unique, isolated endpoint
 - CORS configured for Claude.com and other MCP clients
 - Sessions are maintained server-side
-
-## Shop Selection
-
-The server automatically selects the first available shop in your Printify account. You can switch shops using the `switch-shop` tool:
-
-```javascript
-// List available shops
-list-shops()
-
-// Switch to a specific shop
-switch-shop({ shopId: "1401238" })
-```
-
-## Monitoring & Testing
-
-### Test Connection
-Before registering, you can test your API key connection:
-- Click "Test Connection Only" button on the registration page
-- Shows available shops without creating a session
-
-### Health Check
-```bash
-curl https://your-app.railway.app/health
-```
-
-### Metrics Endpoint
-```bash
-curl https://your-app.railway.app/metrics
-```
-
-Returns detailed server metrics including:
-- Active sessions and usage patterns
-- Memory usage and uptime
-- Deployment configuration
-
-## Troubleshooting
-
-### Common Issues
-
-1. **"Session not found" error**
-   - Your session may have expired (1 hour timeout)
-   - Re-register to get a new MCP URL
-
-2. **"Shop with ID not found" error**
-   - The shop selection may not be persisting correctly
-   - Try listing products without switching shops first
-
-3. **Railway deployment not accessible**
-   - Check that your Railway app is deployed and running
-   - Verify the health endpoint: `https://your-app.railway.app/health`
-
-4. **API key authentication fails**
-   - Ensure your Printify API key is valid and active
-   - Check that you're using the correct API key format
-
-For more detailed troubleshooting, see [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
 
 ## License
 
